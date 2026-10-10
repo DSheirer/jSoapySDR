@@ -48,6 +48,8 @@ if(JS_SDRPLAY_INCLUDE)
         LIBRARY_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/fake-sdrplay"
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/fake-sdrplay"
         RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/fake-sdrplay")
-    file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/fake-sdrplay-path.txt" CONTENT "$<TARGET_FILE:fake_sdrplay_api>")
+    # CONDITION: multi-config generators (Visual Studio) evaluate once per configuration; the tests use Release
+    file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/fake-sdrplay-path.txt" CONTENT "$<TARGET_FILE:fake_sdrplay_api>"
+        CONDITION "$<OR:$<CONFIG:Release>,$<STREQUAL:$<CONFIG>,>>")
 endif()
 
