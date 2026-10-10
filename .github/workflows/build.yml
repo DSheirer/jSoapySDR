@@ -25,7 +25,18 @@ jobs:
     steps:
       - name: Download and extract the SDRplay API headers
         run: |
-          curl -fsSL --retry 3 -o api.run "https://www.sdrplay.com/software/$SDRPLAY_API"
+          # sdrplay.com rejects some clients; try a browser user agent, then wget
+          ua="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36"
+          ok=""
+          for url in "https://www.sdrplay.com/software/$SDRPLAY_API" "https://sdrplay.com/software/$SDRPLAY_API"; do
+            code=$(curl -sSL --retry 3 -A "$ua" -o api.run -w "%{http_code}" "$url" || true)
+            echo "::notice title=SDRplay download::$url -> HTTP $code ($(stat -c %s api.run 2>/dev/null || echo 0) bytes)"
+            if [ "$code" = "200" ] && [ "$(stat -c %s api.run)" -gt 1000000 ]; then ok=1; break; fi
+          done
+          if [ -z "$ok" ]; then
+            wget -q -U "$ua" -O api.run "https://www.sdrplay.com/software/$SDRPLAY_API" && ok=1 || echo "::notice title=SDRplay download::wget failed"
+          fi
+          [ -n "$ok" ] || { echo "::error::Unable to download $SDRPLAY_API"; exit 1; }
           actual=$(sha256sum api.run | cut -d' ' -f1)
           echo "::notice title=SDRplay API sha256::$SDRPLAY_API $actual"
           if [ -n "$SDRPLAY_API_SHA256" ] && [ "$actual" != "$SDRPLAY_API_SHA256" ]; then
