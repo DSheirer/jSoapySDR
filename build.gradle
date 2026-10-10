@@ -38,9 +38,56 @@ tasks.withType(Javadoc).configureEach {
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
+// Bundled native images (natives/<platform>/, produced by native/build.py or downloaded from CI)
+//   ./gradlew jar                               packages whichever platform images are present
+//   ./gradlew jar -Pnatives.required=all        fails unless all six platform images are present (release builds)
+//   -Pnatives.dir=<dir>                         use images from another directory
+// ---------------------------------------------------------------------------------------------------------------------
+
+def nativePlatforms = ['linux-x86_64', 'linux-aarch64', 'macos-x86_64', 'macos-aarch64', 'windows-x86_64',
+                       'windows-aarch64']
+def nativesDir = file(findProperty('natives.dir') ?: 'natives')
+
+tasks.named('processResources', ProcessResources) {
+    from(nativesDir) {
+        include nativePlatforms.collect { "${it}/**" }
+        exclude '*/licenses/**'
+        into 'io/github/dsheirer/soapysdr/natives'
+    }
+    from(nativesDir) {
+        include '*/licenses/*'
+        eachFile { it.path = "META-INF/licenses/${it.name}" }
+        includeEmptyDirs = false
+        duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    }
+}
+
+def verifyNatives = tasks.register('verifyNatives') {
+    group = 'verification'
+    description = 'Checks that the bundled native images required by -Pnatives.required are present'
+    def required = findProperty('natives.required')
+    def dir = nativesDir
+    inputs.property('required', required ?: '')
+    doLast {
+        if (required) {
+            def wanted = required == 'all' ? nativePlatforms : required.split(',').collect { it.trim() }
+            def missing = wanted.findAll { !new File(dir, "${it}/bundle.txt").isFile() }
+            if (missing) {
+                throw new GradleException("Missing bundled native images for ${missing} in ${dir}")
+            }
+        }
+    }
+}
+tasks.named('jar', Jar) {
+    dependsOn verifyNatives
+    from(rootProject.file('LICENSE')) { into 'META-INF' }
+    from(rootProject.file('THIRD-PARTY-NOTICES.md')) { into 'META-INF' }
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
 // Native test driver (src/test/native) - a deterministic fake SoapySDR device used by TestDriverTest.
-// Requires cmake, a C++ compiler and the SoapySDR development headers. Tests that need it are skipped when it is
-// absent unless -Psoapysdr.tests.required=true is set.
+// Requires cmake, a C++ compiler and the SoapySDR development headers (-Psoapysdr.prefix=<dir> to find them, e.g.
+// native/build/<platform>/deps). Tests that need it are skipped when it is absent unless -Psoapysdr.tests.required=true.
 // ---------------------------------------------------------------------------------------------------------------------
 
 def testDriverDir = layout.buildDirectory.dir('native')
@@ -50,8 +97,15 @@ tasks.register('configureTestDriver', Exec) {
     description = 'Configures the jsoapytest SoapySDR driver module with CMake'
     inputs.dir('src/test/native')
     outputs.dir(testDriverDir)
-    commandLine 'cmake', '-S', file('src/test/native').absolutePath, '-B', testDriverDir.get().asFile.absolutePath,
-        '-DCMAKE_BUILD_TYPE=Release'
+    def args = ['cmake', '-S', file('src/test/native').absolutePath, '-B', testDriverDir.get().asFile.absolutePath,
+                '-DCMAKE_BUILD_TYPE=Release']
+    if (findProperty('soapysdr.prefix')) {
+        args << "-DCMAKE_PREFIX_PATH=${file(findProperty('soapysdr.prefix')).absolutePath}"
+    }
+    if (findProperty('soapysdr.msvc.toolset')) {
+        args += ['-T', findProperty('soapysdr.msvc.toolset')]
+    }
+    commandLine args
 }
 
 tasks.register('testDriver', Exec) {
@@ -64,8 +118,11 @@ tasks.register('testDriver', Exec) {
 tasks.named('test', Test) {
     useJUnitPlatform()
     jvmArgs '--enable-native-access=ALL-UNNAMED'
-    environment 'SOAPY_SDR_PLUGIN_PATH', testDriverDir.get().asFile.absolutePath
+    environment 'SOAPY_SDR_PLUGIN_PATH', new File(testDriverDir.get().asFile, 'modules').absolutePath
     systemProperty 'soapysdr.tests.required', findProperty('soapysdr.tests.required') ?: 'false'
+    systemProperty 'soapysdr.tests.bundled', findProperty('soapysdr.tests.bundled') ?: 'false'
+    // Extract into the build directory so test runs never touch the user's cache
+    systemProperty 'soapysdr.natives.dir', layout.buildDirectory.dir('natives-cache').get().asFile.absolutePath
     if (findProperty('soapysdr.library')) {
         systemProperty 'soapysdr.library', findProperty('soapysdr.library')
     }

@@ -2,21 +2,41 @@
 
 Java bindings for [SoapySDR](https://github.com/pothosware/SoapySDR), the vendor-neutral SDR hardware abstraction library, built on Java's **Foreign Function & Memory API** (FFM, [JEP 454](https://openjdk.org/jeps/454)).
 
-There is no JNI glue, no generated code and no native library of its own: jSoapySDR binds directly to the SoapySDR C API (`SoapySDR/Device.h` and friends) at runtime. Any device with a SoapySDR driver module — RTL-SDR, Airspy, HackRF, SDRplay, LimeSDR, PlutoSDR, USRP, and many more — is available from Java.
+There is no JNI glue and no generated code: jSoapySDR binds directly to the SoapySDR C API at runtime. The jar ships with prebuilt SoapySDR images for six platforms, including drivers for the most common receivers, so on those platforms nothing else needs to be installed.
 
 ## Requirements
 
 | | |
 |---|---|
-| Java | 22 or newer at runtime (the build uses a JDK 25 toolchain and targets Java 22 bytecode) |
-| SoapySDR | 0.8.x (API 0.8), plus the driver modules for your hardware |
-| Platform | 64-bit Linux, macOS or Windows |
+| Java | 22 or newer (the build uses a JDK 25 toolchain and targets Java 22 bytecode) |
+| Platforms with a bundled image | Linux x86_64 and aarch64 (glibc 2.28+), macOS 11+ x86_64 and Apple silicon, Windows 10+ x86_64 and ARM64 |
+| Other platforms | A SoapySDR 0.8.x installation (see [Native library lookup](#native-library-lookup)) |
 
-Installing SoapySDR:
+The image is chosen by the JVM's architecture. On Windows on Arm, use an ARM64 JDK (for example the Microsoft Build of OpenJDK) to get the native ARM64 image. An x64 JDK running under emulation also works, using the x86_64 image.
 
-- **Debian/Ubuntu:** `sudo apt install libsoapysdr0.8 soapysdr-module-all` (add `libsoapysdr-dev` to build the test driver)
-- **macOS (Homebrew):** `brew install soapysdr` plus modules such as `soapyrtlsdr`
-- **Windows:** [radioconda](https://github.com/ryanvolz/radioconda) or the PothosSDR installer
+### Bundled image
+
+Each platform image contains:
+
+| Component | Version | Hardware |
+|---|---|---|
+| SoapySDR | 0.8.1 | core library |
+| SoapyRTLSDR + librtlsdr | 0.3.3 + 2.0.2 | RTL2832U dongles (RTL-SDR Blog, NooElec, …) |
+| SoapyAirspy + libairspy | 0.2.0 + 1.0.10 | Airspy R2, Airspy Mini |
+| SoapyAirspyHF + libairspyhf | 0.2.0 + 1.6.8 | Airspy HF+ Discovery, HF+ Dual Port |
+| SoapyHackRF + libhackrf | 0.3.4 + 2024.02.1 | HackRF One |
+
+libusb is linked into each driver, so the image has no dependencies beyond the base operating system (and the Microsoft C++ runtime, which is included on Windows). The build verifies this for every platform.
+
+Other hardware (SDRplay, LimeSDR, USRP, PlutoSDR, …) can be used alongside the bundled drivers by installing that vendor's SoapySDR 0.8 module and pointing jSoapySDR at it with `-Dsoapysdr.plugin.path=<directory>`, or by using a system SoapySDR installation instead of the bundle (`-Dsoapysdr.bundled=false`).
+
+### USB access
+
+The bundled drivers talk to the radio over USB, so the usual per-OS setup still applies:
+
+- **Linux:** install udev rules so your user can open the devices (for example the `rtl-sdr`, `airspy`, `airspyhf` and `hackrf` packages' rules, or the rules files from each project), and blacklist the `dvb_usb_rtl28xxu` kernel module for RTL-SDR dongles.
+- **Windows:** assign the WinUSB driver to the device with [Zadig](https://zadig.akeo.ie/) (RTL-SDR, Airspy, HackRF).
+- **macOS:** no setup needed.
 
 ## Quick start
 
@@ -68,12 +88,12 @@ java --enable-native-access=ALL-UNNAMED ...                   # class path
 
 | Class | Purpose |
 |---|---|
-| `SoapySDR` | Versions, `enumerate()`, `open()`, logging (`setLogHandler`, `setLogLevel`), module loading, kwargs and time helpers |
+| `SoapySDR` | Versions, `enumerate()`, `open()`, logging (`setLogHandler`, `setLogLevel`), module loading, `getNativeLibraryInfo()`, kwargs and time helpers |
 | `Device` | Everything in `SoapySDRDevice_*`: channels, antennas, gain, frequency, sample rate, bandwidth, corrections, clocks, time, sensors, settings, registers, GPIO, I2C, SPI, UART |
 | `Stream` | `activate`/`deactivate`, `read`/`write`, `readStatus`, `getMTU` |
 | `StreamResult` | Element count or `ErrorCode`, flags, time stamp |
 | `Direction`, `Formats`, `StreamFlags`, `ErrorCode`, `LogLevel` | SoapySDR constants |
-| `Range`, `ArgInfo`, `NativeStreamFormat` | SoapySDR structures as Java records |
+| `Range`, `ArgInfo`, `NativeStreamFormat`, `NativeLibraryInfo` | SoapySDR structures and load details as Java records |
 
 Device arguments and keyword maps are plain `Map<String, String>`. Every native allocation is released before a call returns — strings, lists and structures returned by SoapySDR are copied into Java objects and freed with the matching `SoapySDR*_clear`/`SoapySDR_free` call.
 
@@ -86,8 +106,6 @@ Control calls throw `SoapySDRException` carrying the driver's message (SoapySDR'
 - **Java arrays** (`read(float[])`, `read(short[])`, `read(byte[])`, …, and the matching `write` methods) for single-channel streams. The stream owns a reusable native buffer, so steady-state reads don't allocate native memory. The element count is derived from the array length and the stream format (e.g. a `float[2048]` holds 1024 `CF32` elements).
 - **`MemorySegment`s** for zero-copy and multi-channel streams: pass one native segment per channel.
 
-Read and write use exact-typed method handle invocation, so the per-call overhead is a downcall plus a couple of small native writes.
-
 ### Threading
 
 - A `Device` may be controlled from one thread while another thread reads its stream. `close()` waits for an in-progress read or write to return before releasing native resources, and closing a device closes its streams.
@@ -95,15 +113,27 @@ Read and write use exact-typed method handle invocation, so the per-call overhea
 - SoapySDR reports errors through thread-local state on the native thread. Use platform threads (not virtual threads) for device calls so the status check runs on the same OS thread as the call.
 - Log handlers are invoked from native driver threads; keep them fast and thread-safe.
 
-### Native library lookup
+## Native library lookup
 
-The library is located on first use, in this order:
+The native library is loaded on first use:
 
-1. The `soapysdr.library` system property — a library name or an absolute path, e.g. `-Dsoapysdr.library=/opt/soapy/lib/libSoapySDR.so.0.8`
-2. The `SOAPYSDR_LIBRARY` environment variable, with the same meaning
-3. Platform defaults: `libSoapySDR.so.0.8` / `libSoapySDR.so` and common lib directories on Linux; `libSoapySDR.0.8.dylib` in Homebrew and `/usr/local` on macOS; `SoapySDR.dll` on the `PATH`, in PothosSDR or radioconda on Windows
+1. **Explicit library** — if the `soapysdr.library` system property (or `SOAPYSDR_LIBRARY` environment variable) is set to a library name or path, that SoapySDR 0.8 library is loaded and the bundled image is not used.
+2. **Bundled image** (default) — the image matching the JVM's OS and architecture is extracted to a per-user cache and loaded:
+   - Linux: `$XDG_CACHE_HOME/jsoapysdr/natives` or `~/.cache/jsoapysdr/natives`
+   - macOS: `~/Library/Caches/jsoapysdr/natives`
+   - Windows: `%LOCALAPPDATA%\jsoapysdr\natives`
 
-jSoapySDR checks that the loaded library reports API 0.8.x, since the 0.7 `setupStream` signature is not compatible. Driver modules are found by SoapySDR itself; use `SOAPY_SDR_PLUGIN_PATH` to add search directories.
+   Each image is extracted once into a directory named after the hash of its manifest, with every file checked against its SHA-256. A lock file makes simultaneous first runs from several JVMs safe, and later runs reuse the extracted copy. Override the location with `-Dsoapysdr.natives.dir=<dir>`. SoapySDR's root (`SOAPY_SDR_ROOT`) is pointed at the extracted image so that its driver modules are found.
+3. **System installation** — used when there is no bundled image for the platform (e.g. musl-based Linux) or when `-Dsoapysdr.bundled=false` is set: `libSoapySDR.so.0.8` / `libSoapySDR.dylib` / `SoapySDR.dll` from the OS loader path and the usual Homebrew, `/usr/local`, PothosSDR and radioconda locations.
+
+`SoapySDR.getNativeLibraryInfo()` reports which library was loaded and from where. The platform is chosen from the JVM's architecture, so an x64 JVM running under emulation on Arm hardware uses the x86_64 image.
+
+| System property | Effect |
+|---|---|
+| `soapysdr.library` | Load this SoapySDR library (name or path) instead of the bundled image |
+| `soapysdr.bundled=false` | Skip the bundled image and search for a system installation |
+| `soapysdr.natives.dir` | Directory to extract bundled images to |
+| `soapysdr.plugin.path` | Extra directories of SoapySDR 0.8 driver modules to load alongside the bundled drivers (`:`-separated, `;` on Windows) |
 
 ## Building
 
@@ -111,17 +141,28 @@ jSoapySDR checks that the loaded library reports API 0.8.x, since the 0.7 `setup
 ./gradlew build
 ```
 
-The Gradle toolchain resolver downloads a JDK 25 if one isn't installed.
+The Gradle toolchain resolver downloads a JDK 25 if one isn't installed. The jar includes whichever platform images are present under `natives/` (none in a fresh clone, in which case a system SoapySDR is used). Release builds use `-Pnatives.required=all`, which fails unless all six are present; CI produces such a jar as the `jsoapysdr-jar` artifact.
+
+### Building the native images
+
+```
+python3 native/build.py                          # the current platform, into natives/<platform>
+python3 native/build.py --platform linux-aarch64 # must match the machine; there is no cross compilation
+```
+
+The script fetches every component by tag and fails if a tag does not resolve to the pinned commit. It builds SoapySDR and a static libusb, compiles the vendor libraries and Soapy modules, and installs them into a relocatable layout. It then verifies that each binary depends only on the bundle and the base OS, and writes `natives/<platform>/bundle.txt`, which lists every file with its SHA-256. On Windows, vcpkg supplies libusb and pthreads-win32.
+
+Prerequisites: git, CMake 3.24+, Python 3.8+ and a C/C++ toolchain. On Linux and macOS you also need autoconf, automake, libtool and make, and Ninja is used if present. On Windows you need Visual Studio 2022 or newer with the C++ workload. CI builds the Linux images inside the `manylinux_2_28` containers so they run on glibc 2.28 and newer.
 
 ### Tests
 
-Unit tests run against the real SoapySDR library. Most of them use a small, deterministic fake device — the **jsoapytest** driver module in `src/test/native` — so that streaming, struct marshalling and driver error propagation are verified without hardware. Building it needs CMake, a C++ compiler and the SoapySDR headers:
+Unit tests run against the real SoapySDR library. Most use a small deterministic fake device, the **jsoapytest** driver module in `src/test/native`, so streaming, struct marshalling and driver error propagation are verified without hardware. `BundledImageTest` checks the extracted image and its four drivers.
 
 ```
-./gradlew testDriver test
+./gradlew testDriver test -Psoapysdr.prefix=native/build/<platform>/deps
 ```
 
-Tests that need the library or the test driver are skipped when they are unavailable. Pass `-Psoapysdr.tests.required=true` (as CI does) to make that a failure instead.
+`-Psoapysdr.prefix` points the test driver at SoapySDR headers (here, those from the native build); omit it to use a system `libsoapysdr-dev`. Tests that need the library, the test driver or the bundled image are skipped when unavailable. `-Psoapysdr.tests.required=true` and `-Psoapysdr.tests.bundled=true` (as CI uses on all six platforms) turn those skips into failures.
 
 ### Examples
 
@@ -139,4 +180,4 @@ Tests that need the library or the test driver are skipped when they are unavail
 
 ## License
 
-Apache License 2.0 — see [LICENSE](LICENSE). SoapySDR itself is distributed under the Boost Software License 1.0.
+jSoapySDR is licensed under the Apache License 2.0 — see [LICENSE](LICENSE). The bundled native images contain third-party components under their own licenses, including the GPL-2.0 (librtlsdr) and the LGPL-2.1 (libusb); see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md). The license texts are also packaged in the jar under `META-INF/licenses/`.

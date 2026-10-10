@@ -6,3 +6,5 @@ bin/
 *.iml
 .vscode/
 .DS_Store
+natives/
+native/build/

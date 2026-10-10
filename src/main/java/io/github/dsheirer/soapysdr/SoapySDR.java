@@ -90,6 +90,17 @@ public final class SoapySDR
         return toJavaString((MemorySegment)call(SoapyNative.getLibVersion));
     }
 
+    /**
+     * Describes the native library that was loaded: the bundled image for this platform or a system installation.
+     */
+    public static NativeLibraryInfo getNativeLibraryInfo()
+    {
+        getAPIVersion(); // ensure loaded
+        io.github.dsheirer.soapysdr.internal.NativeLibrary.Info info =
+            io.github.dsheirer.soapysdr.internal.NativeLibrary.info();
+        return new NativeLibraryInfo(info.platform(), info.bundled(), info.library(), info.root());
+    }
+
     // ---------------------------------------------------------------------------------------------------------------
     // Utilities
     // ---------------------------------------------------------------------------------------------------------------

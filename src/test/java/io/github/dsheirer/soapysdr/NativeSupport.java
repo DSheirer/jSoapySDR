@@ -16,8 +16,25 @@ final class NativeSupport
 {
     private static final boolean REQUIRED = Boolean.getBoolean("soapysdr.tests.required");
 
+    /** The first load failure; later attempts only report NoClassDefFoundError without the cause. */
+    private static volatile String sFirstFailure;
+
     private NativeSupport()
     {
+    }
+
+    private static String describe(Throwable t)
+    {
+        StringBuilder sb = new StringBuilder();
+        for(Throwable cause = t; cause != null; cause = cause.getCause())
+        {
+            if(sb.length() > 0)
+            {
+                sb.append(" <- caused by ");
+            }
+            sb.append(cause);
+        }
+        return sb.toString();
     }
 
     static void requireLibrary()
@@ -32,7 +49,11 @@ final class NativeSupport
         catch(LinkageError e)
         {
             available = false;
-            reason = e.toString();
+            if(sFirstFailure == null)
+            {
+                sFirstFailure = describe(e);
+            }
+            reason = sFirstFailure;
         }
 
         if(REQUIRED && !available)
