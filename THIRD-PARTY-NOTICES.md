@@ -46,11 +46,14 @@ including with modified versions of these components, by following [Building the
 
 ## SDRplay
 
-No SDRplay software is included. The SDRplay driver module is SoapySDRPlay3 (MIT) compiled together with a
-jSoapySDR runtime loader ([`native/sdrplay/sdrplay_api_shim.cpp`](native/sdrplay/sdrplay_api_shim.cpp), Apache-2.0)
-that loads the SDRplay API library the user installs from SDRplay and calls it. Building the module requires the
-SDRplay API 3.15 header files, which the CI build downloads from sdrplay.com and does not redistribute; the SDRplay
-API itself is licensed by SDRplay Ltd under its own terms.
+No SDRplay library is included in the native images. The SDRplay driver module is SoapySDRPlay3 (MIT) compiled
+together with a jSoapySDR runtime loader ([`native/sdrplay/sdrplay_api_shim.cpp`](native/sdrplay/sdrplay_api_shim.cpp),
+Apache-2.0) that loads the SDRplay API library the user installs from SDRplay and calls it.
+
+Building the module requires the SDRplay API 3.15 header files, copyright SDRplay Ltd, which this source repository
+includes unmodified in [`native/sdrplay/include`](native/sdrplay/include) (see its README for their origin). They
+carry no license notice of their own and are governed by SDRplay's API license terms; the SDRplay API itself is
+licensed by SDRplay Ltd under its own terms.
 
 ## GPL and LGPL components
 

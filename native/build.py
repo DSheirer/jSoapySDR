@@ -61,7 +61,7 @@ WINDOWS_PRELOAD = {
     "windows-aarch64": ["vcruntime140.dll", "msvcp140.dll", "bladeRF.dll"],
 }
 
-# Driver modules always built; SDRplay adds one when its API headers are supplied
+# Driver modules always built; SDRplay adds one unless --sdrplay-include "" is given
 EXPECTED_MODULES = 6
 
 
@@ -308,9 +308,10 @@ def main():
     parser.add_argument("--platform", choices=PLATFORMS, default=None)
     parser.add_argument("--vcpkg-root", default=str(NATIVE_DIR / "build" / "vcpkg"), help="Windows only")
     parser.add_argument("--out", default=None, help="output directory (default <repo>/natives/<platform>)")
-    parser.add_argument("--sdrplay-include", default=os.environ.get("JSOAPYSDR_SDRPLAY_INCLUDE"),
-                        help="directory containing the SDRplay API 3.x headers (sdrplay_api.h); the SDRplay module "
-                             "is built only when given")
+    parser.add_argument("--sdrplay-include",
+                        default=os.environ.get("JSOAPYSDR_SDRPLAY_INCLUDE", str(NATIVE_DIR / "sdrplay" / "include")),
+                        help="directory containing the SDRplay API 3.x headers (default: the copies in "
+                             "native/sdrplay/include); pass an empty string to skip the SDRplay module")
     args = parser.parse_args()
 
     plat = args.platform or detect_platform()

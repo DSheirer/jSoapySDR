@@ -173,7 +173,7 @@ python3 native/build.py                          # the current platform, into na
 python3 native/build.py --platform linux-aarch64 # must match the machine; there is no cross compilation
 ```
 
-The SDRplay driver is built only when the SDRplay API headers are supplied with `--sdrplay-include <dir>` (the `inc` directory of SDRplay's API package; CI downloads them). The script fetches every component by tag and fails if a tag does not resolve to the pinned commit. It builds SoapySDR, a static libusb and libbladeRF, compiles the other vendor libraries and the Soapy modules, and installs them into a relocatable layout. It then verifies that each binary depends only on the bundle and the base OS, and writes `natives/<platform>/bundle.txt`, which lists every file with its SHA-256. On Windows, vcpkg supplies libusb and pthreads-win32.
+The SDRplay driver compiles against the SDRplay API 3.15 headers in `native/sdrplay/include` (pass `--sdrplay-include ""` to skip it). The script fetches every component by tag and fails if a tag does not resolve to the pinned commit. It builds SoapySDR, a static libusb and libbladeRF, compiles the other vendor libraries and the Soapy modules, and installs them into a relocatable layout. It then verifies that each binary depends only on the bundle and the base OS, and writes `natives/<platform>/bundle.txt`, which lists every file with its SHA-256. On Windows, vcpkg supplies libusb and pthreads-win32.
 
 Prerequisites: git, CMake 3.24+, Python 3.8+ and a C/C++ toolchain. On Linux and macOS you also need autoconf, automake, libtool and make, and Ninja is used if present. On Windows you need Visual Studio 2022 or newer with the C++ workload. CI builds the Linux images inside the `manylinux_2_28` containers so they run on glibc 2.28 and newer.
 
@@ -182,7 +182,7 @@ Prerequisites: git, CMake 3.24+, Python 3.8+ and a C/C++ toolchain. On Linux and
 Unit tests run against the real SoapySDR library. Most use a small deterministic fake device, the **jsoapytest** driver module in `src/test/native`, so streaming, struct marshalling and driver error propagation are verified without hardware. `BundledImageTest` checks the extracted image and its drivers; when built with the SDRplay API headers, a fake SDRplay API library checks that the SDRplay driver loads and uses the installed API.
 
 ```
-./gradlew testDriver test -Psoapysdr.prefix=native/build/<platform>/deps [-Psoapysdr.sdrplay.include=<SDRplay API headers>]
+./gradlew testDriver test -Psoapysdr.prefix=native/build/<platform>/deps -Psoapysdr.sdrplay.include=native/sdrplay/include
 ```
 
 `-Psoapysdr.prefix` points the test driver at SoapySDR headers (here, those from the native build); omit it to use a system `libsoapysdr-dev`. Tests that need the library, the test driver or the bundled image are skipped when unavailable. `-Psoapysdr.tests.required=true` and `-Psoapysdr.tests.bundled=true` (as CI uses on all six platforms) turn those skips into failures.
