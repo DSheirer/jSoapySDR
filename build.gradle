@@ -1,0 +1,150 @@
+plugins {
+    id 'java-library'
+    id 'maven-publish'
+}
+
+group = 'io.github.dsheirer'
+version = '0.1.0-SNAPSHOT'
+description = 'Java bindings for SoapySDR using the Foreign Function & Memory API'
+
+java {
+    // Build with JDK 25, emit Java 22 bytecode (the first release with the final FFM API)
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(25)
+    }
+    withSourcesJar()
+    withJavadocJar()
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    testImplementation platform('org.junit:junit-bom:5.13.4')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.release = 22
+    options.encoding = 'UTF-8'
+    options.compilerArgs += ['-Xlint:all,-restricted', '-Werror']
+}
+
+tasks.withType(Javadoc).configureEach {
+    options.encoding = 'UTF-8'
+    (options as StandardJavadocDocletOptions).addBooleanOption('Xdoclint:all,-missing', true)
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Native test driver (src/test/native) - a deterministic fake SoapySDR device used by TestDriverTest.
+// Requires cmake, a C++ compiler and the SoapySDR development headers. Tests that need it are skipped when it is
+// absent unless -Psoapysdr.tests.required=true is set.
+// ---------------------------------------------------------------------------------------------------------------------
+
+def testDriverDir = layout.buildDirectory.dir('native')
+
+tasks.register('configureTestDriver', Exec) {
+    group = 'verification'
+    description = 'Configures the jsoapytest SoapySDR driver module with CMake'
+    inputs.dir('src/test/native')
+    outputs.dir(testDriverDir)
+    commandLine 'cmake', '-S', file('src/test/native').absolutePath, '-B', testDriverDir.get().asFile.absolutePath,
+        '-DCMAKE_BUILD_TYPE=Release'
+}
+
+tasks.register('testDriver', Exec) {
+    group = 'verification'
+    description = 'Builds the jsoapytest SoapySDR driver module used by the unit tests'
+    dependsOn 'configureTestDriver'
+    commandLine 'cmake', '--build', testDriverDir.get().asFile.absolutePath, '--config', 'Release'
+}
+
+tasks.named('test', Test) {
+    useJUnitPlatform()
+    jvmArgs '--enable-native-access=ALL-UNNAMED'
+    environment 'SOAPY_SDR_PLUGIN_PATH', testDriverDir.get().asFile.absolutePath
+    systemProperty 'soapysdr.tests.required', findProperty('soapysdr.tests.required') ?: 'false'
+    if (findProperty('soapysdr.library')) {
+        systemProperty 'soapysdr.library', findProperty('soapysdr.library')
+    }
+    testLogging {
+        events 'passed', 'skipped', 'failed'
+        exceptionFormat = 'full'
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Examples (src/examples/java)
+//   ./gradlew probe                         list devices and print their capabilities
+//   ./gradlew probe --args="driver=rtlsdr"  probe one device
+//   ./gradlew rxPower --args="driver=rtlsdr 162.55e6"
+// ---------------------------------------------------------------------------------------------------------------------
+
+sourceSets {
+    examples {
+        compileClasspath += sourceSets.main.output
+        runtimeClasspath += sourceSets.main.output
+    }
+}
+
+tasks.register('probe', JavaExec) {
+    group = 'examples'
+    description = 'Prints SoapySDR devices and their capabilities'
+    classpath = sourceSets.examples.runtimeClasspath
+    mainClass = 'io.github.dsheirer.soapysdr.examples.Probe'
+    jvmArgs '--enable-native-access=ALL-UNNAMED'
+}
+
+tasks.register('rxPower', JavaExec) {
+    group = 'examples'
+    description = 'Receives samples and prints the average power'
+    classpath = sourceSets.examples.runtimeClasspath
+    mainClass = 'io.github.dsheirer.soapysdr.examples.RxPower'
+    jvmArgs '--enable-native-access=ALL-UNNAMED'
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Publishing: ./gradlew publishToMavenLocal, or ./gradlew publish to GitHub Packages (GITHUB_ACTOR / GITHUB_TOKEN)
+// ---------------------------------------------------------------------------------------------------------------------
+
+publishing {
+    publications {
+        maven(MavenPublication) {
+            artifactId = 'jsoapysdr'
+            from components.java
+            pom {
+                name = 'jSoapySDR'
+                description = project.description
+                url = 'https://github.com/dsheirer/jSoapySDR'
+                licenses {
+                    license {
+                        name = 'Apache License, Version 2.0'
+                        url = 'https://www.apache.org/licenses/LICENSE-2.0'
+                    }
+                }
+                developers {
+                    developer {
+                        id = 'dsheirer'
+                        name = 'Dennis Sheirer'
+                    }
+                }
+                scm {
+                    url = 'https://github.com/dsheirer/jSoapySDR'
+                    connection = 'scm:git:https://github.com/dsheirer/jSoapySDR.git'
+                }
+            }
+        }
+    }
+    repositories {
+        maven {
+            name = 'GitHubPackages'
+            url = 'https://maven.pkg.github.com/dsheirer/jSoapySDR'
+            credentials {
+                username = System.getenv('GITHUB_ACTOR')
+                password = System.getenv('GITHUB_TOKEN')
+            }
+        }
+    }
+}
