@@ -11,6 +11,8 @@ from pathlib import Path
 PATTERN = re.compile(r"error|fatal|failed|failure|exception|undefined|unresolved|not found|cannot|FAILED|LNK\d+|C\d{4}:",
                      re.IGNORECASE)
 WARNING = re.compile(r"warning", re.IGNORECASE)
+# Errors whose text mentions warnings, e.g. MSVC "error C2220: the following warning is treated as an error"
+ERROR_WITH_WARNING = re.compile(r"\berror\b|treated as an? error|-Werror", re.IGNORECASE)
 CHUNK = 3500  # GitHub truncates longer annotation messages
 MAX_ANNOTATIONS = 10  # GitHub keeps at most 10 error annotations per step
 
@@ -28,11 +30,11 @@ def main():
             continue
         lines = path.read_text(errors="replace").splitlines()
         hits = ["%d: %s" % (i + 1, line.strip()[:300]) for i, line in enumerate(lines)
-                if PATTERN.search(line) and not WARNING.search(line)]
+                if PATTERN.search(line) and (not WARNING.search(line) or ERROR_WITH_WARNING.search(line))]
         parts = []
         if hits:
             parts.append(("matched " + path.name, "\n".join(hits[-40:])[-CHUNK:]))
-        tail = "\n".join(line for line in lines[-400:] if not WARNING.search(line))
+        tail = "\n".join(line for line in lines[-400:] if not WARNING.search(line) or ERROR_WITH_WARNING.search(line))
         count = 4 if path.name.endswith(".log") else 1
         pieces = []
         end = len(tail)

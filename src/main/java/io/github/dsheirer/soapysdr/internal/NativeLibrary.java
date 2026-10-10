@@ -54,6 +54,7 @@ public final class NativeLibrary
     public static final String BUNDLED_PROPERTY = "soapysdr.bundled";
     public static final String NATIVES_DIR_PROPERTY = "soapysdr.natives.dir";
     public static final String PLUGIN_PATH_PROPERTY = "soapysdr.plugin.path";
+    public static final String BLADERF_FPGA_DIR_PROPERTY = "soapysdr.bladerf.fpga.dir";
 
     private static final String RESOURCE_ROOT = "/io/github/dsheirer/soapysdr/natives/";
     private static final String MANIFEST = "bundle.txt";
@@ -89,6 +90,13 @@ public final class NativeLibrary
     {
         String platform = platform();
         List<String> failures = new ArrayList<>();
+
+        // libbladeRF looks for FPGA images in BLADERF_SEARCH_DIR (among other places)
+        String fpgaDir = System.getProperty(BLADERF_FPGA_DIR_PROPERTY);
+        if(fpgaDir != null && !fpgaDir.isBlank())
+        {
+            setEnvironment("BLADERF_SEARCH_DIR", Path.of(fpgaDir).toAbsolutePath().toString());
+        }
 
         // 1. Explicit library
         String explicit = firstNonBlank(System.getProperty(LIBRARY_PROPERTY), System.getenv(LIBRARY_ENVIRONMENT));

@@ -12,8 +12,9 @@ Builds SoapySDR and the bundled driver modules for the current (or specified) pl
 
 Steps:
   1. SoapySDR (all platforms) and a static libusb (Linux, macOS; autotools build) are built from pinned git sources
-     into build/<platform>/deps.
-  2. On Windows, vcpkg provides static libusb and pthreads-win32 (see vcpkg.json and triplets/).
+     into build/<platform>/deps. On Windows, vcpkg provides static libusb and pthreads-win32 (see vcpkg.json and
+     triplets/).
+  2. libbladeRF is built as a shared library with its own CMake project against that libusb.
   3. CMakeLists.txt builds the driver modules and installs the bundle; it is then copied to natives/<platform> with a
      manifest (bundle.txt) listing every file with its SHA-256.
 
@@ -40,6 +41,13 @@ VCPKG_COMMIT = "4334d8b4c8916018600212ab4dd4bbdc343065d1"
 SOURCES = {
     "SoapySDR": ("https://github.com/pothosware/SoapySDR", "soapy-sdr-0.8.1", "1cf5a539a21414ff509ff7d0eedfc5fa8edb90c6"),
     "libusb": ("https://github.com/libusb/libusb", "v1.0.29", "15a7ebb4d426c5ce196684347d2b7cafad862626"),
+    "bladeRF": ("https://github.com/Nuand/bladeRF", "libbladeRF_v2.6.0", "09c82087786702d2812f3f0fc909beccf3277233"),
+}
+
+# Git submodules needed from a source: name: [(path, commit)]
+SUBMODULES = {
+    # Analog Devices AD9361 driver used by libbladeRF for the bladeRF 2.0 micro
+    "bladeRF": [("thirdparty/analogdevicesinc/no-OS", "0bba46e6f6f75785a65d425ece37d0a04daf6157")],
 }
 
 PLATFORMS = ["linux-x86_64", "linux-aarch64", "macos-x86_64", "macos-aarch64", "windows-x86_64", "windows-aarch64"]
@@ -49,9 +57,11 @@ MACOS_DEPLOYMENT_TARGET = "11.0"
 # MSVC runtime DLLs that are loaded explicitly (in this order) before SoapySDR.dll. vcruntime140_1.dll exists only for
 # x64; the copy in the ARM64 redistributable folder serves x64 emulation and cannot load into an ARM64 process.
 WINDOWS_PRELOAD = {
-    "windows-x86_64": ["vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll"],
-    "windows-aarch64": ["vcruntime140.dll", "msvcp140.dll"],
+    "windows-x86_64": ["vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll", "bladeRF.dll"],
+    "windows-aarch64": ["vcruntime140.dll", "msvcp140.dll", "bladeRF.dll"],
 }
+
+EXPECTED_MODULES = 6
 
 
 def detect_platform():
@@ -89,6 +99,16 @@ def fetch(name, src_root):
     actual = subprocess.run(["git", "-C", str(path), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
     if actual != commit:
         sys.exit("%s %s resolved to %s, expected %s" % (name, tag, actual, commit))
+    for sub_path, sub_commit in SUBMODULES.get(name, []):
+        sub_dir = path / sub_path
+        current = subprocess.run(["git", "-C", str(sub_dir), "rev-parse", "HEAD"], capture_output=True,
+                                 text=True).stdout.strip() if (sub_dir / ".git").exists() else ""
+        if current != sub_commit:
+            run(["git", "-C", path, "submodule", "update", "--init", "--depth", "1", "--", sub_path])
+            current = subprocess.run(["git", "-C", str(sub_dir), "rev-parse", "HEAD"], capture_output=True,
+                                     text=True).stdout.strip()
+        if current != sub_commit:
+            sys.exit("%s submodule %s is at %s, expected %s" % (name, sub_path, current, sub_commit))
     return path
 
 
@@ -155,6 +175,69 @@ def build_libusb(plat, src, build_dir, deps):
     run(["make", "install"], cwd=work, env=env)
 
 
+def vcpkg_install(plat, vcpkg, build_dir):
+    """Windows: installs libusb and pthreads4w (vcpkg.json) for the platform's triplet, returning the triplet's
+    installed directory. Done up front because libbladeRF needs libusb before the main project is configured."""
+    triplet = ("arm64" if plat.endswith("aarch64") else "x64") + "-windows-jsoapy"
+    installed = build_dir / "vcpkg_installed"
+    run([vcpkg / "vcpkg.exe", "install", "--triplet", triplet,
+         "--overlay-triplets=" + str(NATIVE_DIR / "triplets"),
+         "--x-manifest-root=" + str(NATIVE_DIR),
+         "--x-install-root=" + str(installed),
+         "--disable-metrics"])
+    return triplet, installed
+
+
+def build_bladerf(plat, src, build_dir, deps, libusb_include, libusb_library):
+    """libbladeRF as a shared library (its only supported form) built by its own CMake project against our static
+    libusb, then copied with its headers into the dependency prefix. Returns (link library, runtime file)."""
+    # Configure the library only: the utilities need extra libraries (curses, libedit) and another submodule
+    utilities = src / "host" / "utilities" / "CMakeLists.txt"
+    utilities.write_text("# jSoapySDR: utilities are not built\n")
+
+    work = build_dir / "bladerf"
+    args = ["cmake", "-S", src / "host", "-B", work, "-DCMAKE_BUILD_TYPE=Release",
+            "-DCMAKE_POLICY_VERSION_MINIMUM=3.5",
+            "-DBUILD_DOCUMENTATION=OFF", "-DTEST_LIBBLADERF=OFF",
+            # Newer compilers warn about libbladeRF code that its warnings-as-errors default turns into failures
+            "-DTREAT_WARNINGS_AS_ERRORS=OFF",
+            "-DENABLE_BACKEND_LIBUSB=ON", "-DENABLE_BACKEND_CYAPI=OFF", "-DENABLE_BACKEND_DUMMY=OFF",
+            "-DENABLE_LIBBLADERF_SYSLOG=OFF",
+            # Use our static libusb rather than searching for one
+            "-DLIBUSB_FOUND=TRUE", "-DLIBUSB_SKIP_VERSION_CHECK=ON",
+            "-DLIBUSB_HEADER_FILE=" + cmake_path(Path(libusb_include) / "libusb.h"),
+            "-Dusb_LIBRARY=" + cmake_path(libusb_library)] + cmake_platform_args(plat)
+    if plat.startswith("macos"):
+        args.append("-DCMAKE_SHARED_LINKER_FLAGS_INIT=-framework CoreFoundation -framework IOKit -framework Security -lobjc")
+    elif plat.startswith("linux"):
+        args.append("-DCMAKE_SHARED_LINKER_FLAGS_INIT=-pthread")
+    else:
+        args.append("-DCMAKE_SHARED_LINKER_FLAGS_INIT=advapi32.lib setupapi.lib")
+    run(args)
+    run(["cmake", "--build", work, "--config", "Release", "--target", "libbladerf_shared", "--parallel"])
+
+    include = deps / "include"
+    include.mkdir(parents=True, exist_ok=True)
+    for header in (src / "host" / "libraries" / "libbladeRF" / "include").glob("*.h"):
+        shutil.copy2(header, include / header.name)
+
+    if is_windows(plat):
+        dll = next(work.rglob("bladeRF.dll"))
+        lib = next(p for p in work.rglob("bladeRF.lib"))
+        (deps / "bin").mkdir(parents=True, exist_ok=True)
+        (deps / "lib").mkdir(parents=True, exist_ok=True)
+        shutil.copy2(dll, deps / "bin" / dll.name)
+        shutil.copy2(lib, deps / "lib" / lib.name)
+        return deps / "lib" / lib.name, deps / "bin" / dll.name
+
+    pattern = "libbladeRF.*.dylib" if plat.startswith("macos") else "libbladeRF.so.*"
+    real = next(p for p in work.rglob(pattern) if p.is_file() and not p.is_symlink())
+    (deps / "lib").mkdir(parents=True, exist_ok=True)
+    target = deps / "lib" / real.name
+    shutil.copy2(real, target)
+    return target, target
+
+
 def ensure_vcpkg(root):
     root = Path(root)
     exe = root / ("vcpkg.exe" if os.name == "nt" else "vcpkg")
@@ -205,8 +288,8 @@ def write_bundle(stage, out, plat):
         preload = []
 
     modules = [r for r in rel if r.startswith("lib/SoapySDR/modules")]
-    if len(modules) != 4:
-        sys.exit("Expected 4 driver modules but found: " + str(modules))
+    if len(modules) != EXPECTED_MODULES:
+        sys.exit("Expected %d driver modules but found: %s" % (EXPECTED_MODULES, modules))
 
     lines = ["# jSoapySDR native bundle", "platform=" + plat, "core=" + core]
     lines += ["preload=" + p for p in preload]
@@ -248,15 +331,31 @@ def main():
 
     if is_windows(plat):
         vcpkg = ensure_vcpkg(args.vcpkg_root)
+        triplet, installed = vcpkg_install(plat, vcpkg, build_dir)
+        libusb_include = installed / triplet / "include" / "libusb-1.0"
+        libusb_library = installed / triplet / "lib" / "libusb-1.0.lib"
         configure += [
             "-DCMAKE_TOOLCHAIN_FILE=" + cmake_path(vcpkg / "scripts" / "buildsystems" / "vcpkg.cmake"),
-            "-DVCPKG_TARGET_TRIPLET=" + ("arm64" if plat.endswith("aarch64") else "x64") + "-windows-jsoapy",
+            "-DVCPKG_TARGET_TRIPLET=" + triplet,
             "-DVCPKG_OVERLAY_TRIPLETS=" + cmake_path(NATIVE_DIR / "triplets"),
+            "-DVCPKG_INSTALLED_DIR=" + cmake_path(installed),
+            "-DVCPKG_MANIFEST_INSTALL=OFF",
         ]
     else:
         libusb_src = fetch("libusb", src_root)
         build_libusb(plat, libusb_src, build_dir, deps)
+        libusb_include = deps / "include" / "libusb-1.0"
+        libusb_library = deps / "lib" / "libusb-1.0.a"
         configure.append("-DJS_LICENSE_LIBUSB=" + cmake_path(libusb_src / "COPYING"))
+
+    bladerf_src = fetch("bladeRF", src_root)
+    bladerf_link, bladerf_runtime = build_bladerf(plat, bladerf_src, build_dir, deps, libusb_include, libusb_library)
+    configure += [
+        "-DJS_BLADERF_SOURCE=" + cmake_path(bladerf_src),
+        "-DJS_BLADERF_LIBRARY=" + cmake_path(bladerf_link),
+        "-DJS_BLADERF_RUNTIME=" + cmake_path(bladerf_runtime),
+        "-DJS_BLADERF_INCLUDE=" + cmake_path(deps / "include"),
+    ]
 
     run(configure)
     run(["cmake", "--build", build_dir / "modules", "--config", "Release", "--parallel"])

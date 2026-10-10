@@ -36,9 +36,9 @@ public class Smoke
             modules.put(Path.of(module).getFileName().toString(), SoapySDR.getModuleVersion(module));
         }
         System.out.println("Modules: " + modules);
-        check(modules.size() == 4, "expected 4 bundled driver modules");
+        check(modules.size() == 6, "expected 6 bundled driver modules");
 
-        for(String driver : List.of("rtlsdr", "airspy", "airspyhf", "hackrf"))
+        for(String driver : List.of("rtlsdr", "airspy", "airspyhf", "hackrf", "hydrasdr", "bladerf"))
         {
             System.out.println("enumerate driver=" + driver + ": " + SoapySDR.enumerate("driver=" + driver));
         }

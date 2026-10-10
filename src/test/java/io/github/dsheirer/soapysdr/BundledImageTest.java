@@ -33,7 +33,9 @@ class BundledImageTest
         "rtlsdrSupport", "0.3.3",
         "airspySupport", "0.2.0",
         "airspyhfSupport", "0.2.0",
-        "HackRFSupport", "0.3.4");
+        "HackRFSupport", "0.3.4",
+        "SoapyHydraSDR", "1.0.1",
+        "bladeRFSupport", "0.4.2");
 
     @BeforeEach
     void requireBundled()
@@ -85,7 +87,7 @@ class BundledImageTest
     void enumerateEveryDriverWithoutHardware()
     {
         // Must not crash even where libusb cannot initialize (containers, CI); finds no devices without hardware
-        for(String driver : List.of("rtlsdr", "airspy", "airspyhf", "hackrf"))
+        for(String driver : List.of("rtlsdr", "airspy", "airspyhf", "hackrf", "hydrasdr", "bladerf"))
         {
             for(Map<String, String> device : SoapySDR.enumerate("driver=" + driver))
             {

@@ -1,9 +1,10 @@
 # jSoapySDR native bundle
 #
-# Builds the RTL-SDR, Airspy, Airspy HF+ and HackRF SoapySDR driver modules for one platform and installs them, along
-# with the SoapySDR core library, into a relocatable layout:
+# Builds the RTL-SDR, Airspy, Airspy HF+, HackRF, HydraSDR and bladeRF SoapySDR driver modules for one platform and
+# installs them, along with the SoapySDR core library, into a relocatable layout:
 #
 #   <prefix>/lib/libSoapySDR.so.0.8 | lib/libSoapySDR.0.8.dylib | bin/SoapySDR.dll
+#   <prefix>/lib/libbladeRF.so.2    | lib/libbladeRF.2.dylib    | bin/bladeRF.dll
 #   <prefix>/lib/SoapySDR/modules0.8/<driver modules>
 #   <prefix>/bin/<MSVC runtime DLLs>                  (Windows only)
 #   <prefix>/licenses/<third party license texts>
@@ -11,7 +12,9 @@
 # build.py first builds SoapySDR (all platforms) and a static libusb (Linux, macOS) from pinned sources into a
 # dependency prefix found through CMAKE_PREFIX_PATH; on Windows libusb and pthreads-win32 come from vcpkg (vcpkg.json).
 # The vendor driver libraries are compiled here as static libraries and linked into their Soapy module, so each module
-# depends only on the SoapySDR core library (and, on Windows, the MSVC runtime).
+# depends only on the SoapySDR core library (and, on Windows, the MSVC runtime). The exception is libbladeRF, which
+# only supports a shared build: build.py builds it and passes JS_BLADERF_LIBRARY (to link), JS_BLADERF_RUNTIME (to
+# install), JS_BLADERF_INCLUDE and JS_BLADERF_SOURCE.
 #
 # Use build.py rather than invoking this file directly.
 
@@ -113,6 +116,9 @@ fetch_source(soapyrtlsdr   https://github.com/pothosware/SoapyRTLSDR      soapy-
 fetch_source(soapyairspy   https://github.com/pothosware/SoapyAirspy      soapy-airspy-0.2.0    411f73e16532cf6c0fe40209b83e7115ad43c108)
 fetch_source(soapyairspyhf https://github.com/pothosware/SoapyAirspyHF    soapy-airspyhf-0.2.0  d6825331a6bfc3578dc6fe5091fce3d550b6af3c)
 fetch_source(soapyhackrf   https://github.com/pothosware/SoapyHackRF      soapy-hackrf-0.3.4    79077f0425f732954c1d74dbbacd788b0ac7d733)
+fetch_source(hydrasdr      https://github.com/hydrasdr/hydrasdr-host      v1.1.3                16942cbcbde47198abc6b7968c700ed0cbb8cc87)
+fetch_source(soapyhydrasdr https://github.com/hydrasdr/SoapyHydraSDR      v1.0.1                253ce5089faab6fbe66c220e853b1f39f974153a)
+fetch_source(soapybladerf  https://github.com/pothosware/SoapyBladeRF     soapy-bladerf-0.4.2   f214a6d28d16e20ec77bb87bc6104cce6165c836)
 
 # ---------------------------------------------------------------------------------------------------------------------
 # Vendor libraries (static)
@@ -170,6 +176,53 @@ target_include_directories(hackrf_static PUBLIC ${hackrf_DIR}/host/libhackrf/src
 target_compile_definitions(hackrf_static PRIVATE LIBRARY_VERSION="2024.02.1" LIBRARY_RELEASE="2024.02.1")
 target_link_libraries(hackrf_static PUBLIC usb ${PTHREADS})
 
+set(HYDRASDR_SRC ${hydrasdr_DIR}/libhydrasdr/src)
+add_library(hydrasdr_static STATIC
+    ${HYDRASDR_SRC}/hydrasdr.c
+    ${HYDRASDR_SRC}/hydrasdr_shared.c
+    ${HYDRASDR_SRC}/hydrasdr_rfone.c
+    ${HYDRASDR_SRC}/iqconverter.c
+    ${HYDRASDR_SRC}/iqconverter_lut.c
+    ${HYDRASDR_SRC}/iqconverter_float.c
+    ${HYDRASDR_SRC}/iqconverter_int16.c
+    ${HYDRASDR_SRC}/iqconverter_float_opt.c
+    ${HYDRASDR_SRC}/iqconverter_int16_opt.c
+    ${HYDRASDR_SRC}/iqconverter_float_opt33.c
+    ${HYDRASDR_SRC}/iqconverter_int16_opt33.c
+    ${HYDRASDR_SRC}/iqconverter_float_opt65.c
+    ${HYDRASDR_SRC}/iqconverter_int16_opt65.c
+    ${HYDRASDR_SRC}/iqconverter_float_opt83.c
+    ${HYDRASDR_SRC}/iqconverter_int16_opt83.c
+    ${HYDRASDR_SRC}/iqconverter_decimator.c
+    ${HYDRASDR_SRC}/iqconverter_float_opt_dec.c
+    ${HYDRASDR_SRC}/iqconverter_int16_opt_dec.c)
+configure_file(${HYDRASDR_SRC}/hydrasdr.h ${VENDOR_INCLUDE}/libhydrasdr/hydrasdr.h COPYONLY)
+configure_file(${HYDRASDR_SRC}/hydrasdr_commands.h ${VENDOR_INCLUDE}/libhydrasdr/hydrasdr_commands.h COPYONLY)
+target_include_directories(hydrasdr_static PUBLIC ${HYDRASDR_SRC} ${VENDOR_INCLUDE})
+# ADD_EXPORTS: the header otherwise declares the API dllimport on Windows
+target_compile_definitions(hydrasdr_static PUBLIC ADD_EXPORTS)
+if(MSVC)
+    target_include_directories(hydrasdr_static PRIVATE ${HYDRASDR_SRC}/win32)
+    target_compile_options(hydrasdr_static PRIVATE /fp:fast)
+else()
+    set_target_properties(hydrasdr_static PROPERTIES C_STANDARD 11 C_EXTENSIONS ON)
+    target_compile_options(hydrasdr_static PRIVATE -fno-math-errno -fno-trapping-math)
+endif()
+target_link_libraries(hydrasdr_static PUBLIC usb ${PTHREADS})
+if(NOT MSVC)
+    target_link_libraries(hydrasdr_static PUBLIC m)
+endif()
+
+# libbladeRF (shared, built by build.py)
+add_library(bladerf SHARED IMPORTED)
+target_include_directories(bladerf INTERFACE "${JS_BLADERF_INCLUDE}")
+if(WIN32)
+    set_target_properties(bladerf PROPERTIES IMPORTED_IMPLIB "${JS_BLADERF_LIBRARY}"
+        IMPORTED_LOCATION "${JS_BLADERF_RUNTIME}")
+else()
+    set_target_properties(bladerf PROPERTIES IMPORTED_LOCATION "${JS_BLADERF_LIBRARY}")
+endif()
+
 # The airspy/airspyhf/hackrf headers declare their API dllexport on Windows; with static linking that only means the
 # functions are also exported from the module DLL, which is harmless.
 
@@ -211,6 +264,16 @@ soapy_module(HackRFSupport 0.3.4 ${soapyhackrf_DIR}
     ${soapyhackrf_DIR}/HackRF_Streaming.cpp ${soapyhackrf_DIR}/HackRF_Session.cpp)
 target_link_libraries(HackRFSupport PRIVATE hackrf_static)
 
+soapy_module(SoapyHydraSDR 1.0.1 ${soapyhydrasdr_DIR}
+    ${soapyhydrasdr_DIR}/Registration.cpp ${soapyhydrasdr_DIR}/Settings.cpp ${soapyhydrasdr_DIR}/Streaming.cpp)
+target_compile_definitions(SoapyHydraSDR PRIVATE SOAPYHYDRASDR_VERSION="1.0.1")
+target_link_libraries(SoapyHydraSDR PRIVATE hydrasdr_static)
+
+soapy_module(bladeRFSupport 0.4.2 ${soapybladerf_DIR}
+    ${soapybladerf_DIR}/bladeRF_Registration.cpp ${soapybladerf_DIR}/bladeRF_Settings.cpp
+    ${soapybladerf_DIR}/bladeRF_Streaming.cpp)
+target_link_libraries(bladeRFSupport PRIVATE bladerf)
+
 # ---------------------------------------------------------------------------------------------------------------------
 # SoapySDR core library and runtime files
 # ---------------------------------------------------------------------------------------------------------------------
@@ -221,7 +284,7 @@ if(NOT SOAPY_LOCATION)
 endif()
 
 if(WIN32)
-    install(FILES "${SOAPY_LOCATION}" DESTINATION bin)
+    install(FILES "${SOAPY_LOCATION}" "${JS_BLADERF_RUNTIME}" DESTINATION bin)
 
     # MSVC runtime DLLs, deployed app-locally. Located relative to the compiler
     # (<VS>/VC/Tools/MSVC/<ver>/bin/Host<arch>/<arch>/cl.exe -> <VS>/VC/Redist/MSVC/<ver>/<arch>/Microsoft.VC*.CRT)
@@ -254,6 +317,8 @@ else()
         set(SOAPY_NAME "libSoapySDR.so.${SOAPY_SDR_ABI_VERSION}")
     endif()
     install(FILES "${SOAPY_REAL}" DESTINATION lib RENAME "${SOAPY_NAME}")
+    # Copied by build.py under its SONAME / install name file name
+    install(FILES "${JS_BLADERF_RUNTIME}" DESTINATION lib)
 endif()
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -284,6 +349,11 @@ function(license_from_header source output)
 endfunction()
 license_from_header("${airspy_DIR}/libairspy/src/airspy.c" libairspy-BSD-3-Clause.txt)
 license_from_header("${hackrf_DIR}/host/libhackrf/src/hackrf.c" libhackrf-BSD-3-Clause.txt)
+license_from_header("${JS_BLADERF_SOURCE}/thirdparty/analogdevicesinc/no-OS/ad9361/sw/ad9361.c" ad9361-no-OS-ADI.txt)
+install(FILES "${hydrasdr_DIR}/libhydrasdr/LICENSE.md" DESTINATION licenses RENAME libhydrasdr-MIT-BSD-3-Clause.md)
+install(FILES "${soapyhydrasdr_DIR}/LICENSE.txt" DESTINATION licenses RENAME SoapyHydraSDR-MIT.txt)
+install(FILES "${JS_BLADERF_SOURCE}/legal/licenses/LICENSE.LGPLv2.1" DESTINATION licenses RENAME libbladeRF-LGPL-2.1.txt)
+install(FILES "${soapybladerf_DIR}/LICENSE.LGPLv2.1" DESTINATION licenses RENAME SoapyBladeRF-LGPL-2.1.txt)
 install(FILES "${soapyrtlsdr_DIR}/LICENSE.txt" DESTINATION licenses RENAME SoapyRTLSDR-MIT.txt)
 install(FILES "${soapyairspy_DIR}/LICENSE.txt" DESTINATION licenses RENAME SoapyAirspy-MIT.txt)
 install(FILES "${soapyairspyhf_DIR}/LICENSE.txt" DESTINATION licenses RENAME SoapyAirspyHF-MIT.txt)

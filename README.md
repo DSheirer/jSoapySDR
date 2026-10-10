@@ -25,8 +25,19 @@ Each platform image contains:
 | SoapyAirspy + libairspy | 0.2.0 + 1.0.10 | Airspy R2, Airspy Mini |
 | SoapyAirspyHF + libairspyhf | 0.2.0 + 1.6.8 | Airspy HF+ Discovery, HF+ Dual Port |
 | SoapyHackRF + libhackrf | 0.3.4 + 2024.02.1 | HackRF One |
+| SoapyHydraSDR + libhydrasdr | 1.0.1 + 1.1.3 | HydraSDR RFOne |
+| SoapyBladeRF + libbladeRF | 0.4.2 + 2.6.0 | bladeRF x40/x115, bladeRF 2.0 micro xA4/xA5/xA9 |
 
-libusb is linked into each driver, so the image has no dependencies beyond the base operating system (and the Microsoft C++ runtime, which is included on Windows). The build verifies this for every platform.
+libusb is linked into each driver (and into libbladeRF, which is included as a separate shared library), so the image has no dependencies beyond the base operating system (and the Microsoft C++ runtime, which is included on Windows). The build verifies this for every platform.
+
+### bladeRF FPGA images
+
+A bladeRF needs its FPGA configured before it can stream. FPGA images and FX3 firmware are not bundled. Either:
+
+- enable FPGA autoloading from the board's flash once with Nuand's `bladeRF-cli` (`bladeRF-cli -L <image>.rbf`), or
+- download the image matching libbladeRF 2.6.0 for your board from [Nuand](https://www.nuand.com/fpga_images/) (`hostedxA4.rbf`, `hostedxA9.rbf`, `hostedx40.rbf`, …) and either set `-Dsoapysdr.bladerf.fpga.dir=<directory>` or put it in one of libbladeRF's usual search locations (`~/.config/Nuand/bladeRF/` on Linux and macOS, `%APPDATA%\Nuand\bladeRF\` on Windows).
+
+Keep the board's FX3 firmware current with Nuand's tools, as libbladeRF 2.6.0 requires.
 
 Other hardware (SDRplay, LimeSDR, USRP, PlutoSDR, …) can be used alongside the bundled drivers by installing that vendor's SoapySDR 0.8 module and pointing jSoapySDR at it with `-Dsoapysdr.plugin.path=<directory>`, or by using a system SoapySDR installation instead of the bundle (`-Dsoapysdr.bundled=false`).
 
@@ -34,8 +45,8 @@ Other hardware (SDRplay, LimeSDR, USRP, PlutoSDR, …) can be used alongside the
 
 The bundled drivers talk to the radio over USB, so the usual per-OS setup still applies:
 
-- **Linux:** install udev rules so your user can open the devices (for example the `rtl-sdr`, `airspy`, `airspyhf` and `hackrf` packages' rules, or the rules files from each project), and blacklist the `dvb_usb_rtl28xxu` kernel module for RTL-SDR dongles.
-- **Windows:** assign the WinUSB driver to the device with [Zadig](https://zadig.akeo.ie/) (RTL-SDR, Airspy, HackRF).
+- **Linux:** install udev rules so your user can open the devices (for example the `rtl-sdr`, `airspy`, `airspyhf`, `hackrf`, `hydrasdr` and `libbladerf` packages' rules, or the rules files from each project), and blacklist the `dvb_usb_rtl28xxu` kernel module for RTL-SDR dongles.
+- **Windows:** assign the WinUSB driver to the device with [Zadig](https://zadig.akeo.ie/) (RTL-SDR, Airspy, HackRF, HydraSDR, bladeRF).
 - **macOS:** no setup needed.
 
 ## Quick start
@@ -134,6 +145,7 @@ The native library is loaded on first use:
 | `soapysdr.bundled=false` | Skip the bundled image and search for a system installation |
 | `soapysdr.natives.dir` | Directory to extract bundled images to |
 | `soapysdr.plugin.path` | Extra directories of SoapySDR 0.8 driver modules to load alongside the bundled drivers (`:`-separated, `;` on Windows) |
+| `soapysdr.bladerf.fpga.dir` | Directory containing bladeRF FPGA images (sets `BLADERF_SEARCH_DIR`) |
 
 ## Building
 
@@ -150,13 +162,13 @@ python3 native/build.py                          # the current platform, into na
 python3 native/build.py --platform linux-aarch64 # must match the machine; there is no cross compilation
 ```
 
-The script fetches every component by tag and fails if a tag does not resolve to the pinned commit. It builds SoapySDR and a static libusb, compiles the vendor libraries and Soapy modules, and installs them into a relocatable layout. It then verifies that each binary depends only on the bundle and the base OS, and writes `natives/<platform>/bundle.txt`, which lists every file with its SHA-256. On Windows, vcpkg supplies libusb and pthreads-win32.
+The script fetches every component by tag and fails if a tag does not resolve to the pinned commit. It builds SoapySDR, a static libusb and libbladeRF, compiles the other vendor libraries and the Soapy modules, and installs them into a relocatable layout. It then verifies that each binary depends only on the bundle and the base OS, and writes `natives/<platform>/bundle.txt`, which lists every file with its SHA-256. On Windows, vcpkg supplies libusb and pthreads-win32.
 
 Prerequisites: git, CMake 3.24+, Python 3.8+ and a C/C++ toolchain. On Linux and macOS you also need autoconf, automake, libtool and make, and Ninja is used if present. On Windows you need Visual Studio 2022 or newer with the C++ workload. CI builds the Linux images inside the `manylinux_2_28` containers so they run on glibc 2.28 and newer.
 
 ### Tests
 
-Unit tests run against the real SoapySDR library. Most use a small deterministic fake device, the **jsoapytest** driver module in `src/test/native`, so streaming, struct marshalling and driver error propagation are verified without hardware. `BundledImageTest` checks the extracted image and its four drivers.
+Unit tests run against the real SoapySDR library. Most use a small deterministic fake device, the **jsoapytest** driver module in `src/test/native`, so streaming, struct marshalling and driver error propagation are verified without hardware. `BundledImageTest` checks the extracted image and its six drivers.
 
 ```
 ./gradlew testDriver test -Psoapysdr.prefix=native/build/<platform>/deps

@@ -9,9 +9,17 @@
 set(stage "${JS_STAGE}")
 file(GLOB modules "${stage}/lib/SoapySDR/modules*/*")
 set(core "${stage}/${JS_CORE}")
+# Other bundled shared libraries (libbladeRF)
+if(JS_OS STREQUAL "Windows")
+    file(GLOB libraries "${stage}/bin/*.dll")
+    list(FILTER libraries EXCLUDE REGEX "/(msvcp|vcruntime|concrt|vccorlib)[^/]*$")
+else()
+    file(GLOB libraries "${stage}/lib/*.so*" "${stage}/lib/*.dylib")
+endif()
+list(REMOVE_ITEM libraries "${core}")
 
 if(JS_OS STREQUAL "Darwin")
-    foreach(binary IN LISTS core modules)
+    foreach(binary IN LISTS core libraries modules)
         execute_process(COMMAND codesign --force --sign - "${binary}" RESULT_VARIABLE rc ERROR_VARIABLE err)
         if(NOT rc EQUAL 0)
             message(FATAL_ERROR "codesign failed for ${binary}: ${err}")
@@ -26,7 +34,7 @@ if(JS_OS STREQUAL "Windows")
     # Do not descend into the operating system's own DLLs
     set(post_exclude "^[A-Za-z]:[/\\\\][Ww][Ii][Nn][Dd][Oo][Ww][Ss][/\\\\]")
     # ...but these must be resolved from the bundle
-    set(required_bundled soapysdr.dll msvcp140.dll vcruntime140.dll)
+    set(required_bundled soapysdr.dll bladerf.dll msvcp140.dll vcruntime140.dll)
 elseif(JS_OS STREQUAL "Darwin")
     set(search_dirs "${stage}/lib")
     set(allowed_system "^/usr/lib/|^/System/Library/")
@@ -42,7 +50,7 @@ else()
 endif()
 
 file(GET_RUNTIME_DEPENDENCIES
-    LIBRARIES "${core}"
+    LIBRARIES "${core}" ${libraries}
     MODULES ${modules}
     DIRECTORIES ${search_dirs}
     PRE_EXCLUDE_REGEXES ${pre_exclude}
