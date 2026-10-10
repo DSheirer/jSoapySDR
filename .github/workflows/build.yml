@@ -36,7 +36,15 @@ jobs:
           if [ -z "$ok" ]; then
             wget -q -U "$ua" -O api.run "https://www.sdrplay.com/software/$SDRPLAY_API" && ok=1 || echo "::notice title=SDRplay download::wget failed"
           fi
-          [ -n "$ok" ] || { echo "::error::Unable to download $SDRPLAY_API"; exit 1; }
+          if [ -z "$ok" ]; then
+            # Report the installer links SDRplay currently publishes, to update SDRPLAY_API
+            for page in https://www.sdrplay.com/api/ https://www.sdrplay.com/downloads/ https://www.sdrplay.com/software/; do
+              links=$(curl -sSL -A "$ua" "$page" | grep -oE "[^\"' <>]*(SDRplay|sdrplay)[^\"' <>]*\.(run|pkg|exe)" | sort -u | head -20 | tr '\n' ' ')
+              echo "::notice title=SDRplay links on $page::${links:-none}"
+            done
+            echo "::error::Unable to download $SDRPLAY_API"
+            exit 1
+          fi
           actual=$(sha256sum api.run | cut -d' ' -f1)
           echo "::notice title=SDRplay API sha256::$SDRPLAY_API $actual"
           if [ -n "$SDRPLAY_API_SHA256" ] && [ "$actual" != "$SDRPLAY_API_SHA256" ]; then
