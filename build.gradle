@@ -88,6 +88,7 @@ tasks.named('jar', Jar) {
 // Native test driver (src/test/native) - a deterministic fake SoapySDR device used by TestDriverTest.
 // Requires cmake, a C++ compiler and the SoapySDR development headers (-Psoapysdr.prefix=<dir> to find them, e.g.
 // native/build/<platform>/deps). Tests that need it are skipped when it is absent unless -Psoapysdr.tests.required=true.
+// With -Psoapysdr.sdrplay.include=<SDRplay API headers> it also builds a fake SDRplay API library for the SDRplay tests.
 // ---------------------------------------------------------------------------------------------------------------------
 
 def testDriverDir = layout.buildDirectory.dir('native')
@@ -101,6 +102,9 @@ tasks.register('configureTestDriver', Exec) {
                 '-DCMAKE_BUILD_TYPE=Release']
     if (findProperty('soapysdr.prefix')) {
         args << "-DCMAKE_PREFIX_PATH=${file(findProperty('soapysdr.prefix')).absolutePath}"
+    }
+    if (findProperty('soapysdr.sdrplay.include')) {
+        args << "-DJS_SDRPLAY_INCLUDE=${file(findProperty('soapysdr.sdrplay.include')).absolutePath}"
     }
     if (findProperty('soapysdr.msvc.toolset')) {
         args += ['-T', findProperty('soapysdr.msvc.toolset')]
@@ -121,6 +125,15 @@ tasks.named('test', Test) {
     environment 'SOAPY_SDR_PLUGIN_PATH', new File(testDriverDir.get().asFile, 'modules').absolutePath
     systemProperty 'soapysdr.tests.required', findProperty('soapysdr.tests.required') ?: 'false'
     systemProperty 'soapysdr.tests.bundled', findProperty('soapysdr.tests.bundled') ?: 'false'
+    systemProperty 'soapysdr.tests.sdrplay', findProperty('soapysdr.sdrplay.include') ? 'true' : 'false'
+    // Point the bundled SDRplay module at the fake SDRplay API library when the test driver build produced one
+    def fakeSdrplay = new File(testDriverDir.get().asFile, 'fake-sdrplay-path.txt')
+    doFirst {
+        if (fakeSdrplay.isFile()) {
+            environment 'SOAPY_SDR_SDRPLAY_API', fakeSdrplay.text.trim()
+            systemProperty 'soapysdr.tests.fake.sdrplay', 'true'
+        }
+    }
     // Extract into the build directory so test runs never touch the user's cache
     systemProperty 'soapysdr.natives.dir', layout.buildDirectory.dir('natives-cache').get().asFile.absolutePath
     if (findProperty('soapysdr.library')) {

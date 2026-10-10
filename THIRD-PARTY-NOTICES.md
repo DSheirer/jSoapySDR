@@ -18,6 +18,7 @@ including with modified versions of these components, by following [Building the
 | SoapyHackRF | 0.3.4 | MIT | https://github.com/pothosware/SoapyHackRF (`79077f04`) | Driver module |
 | SoapyHydraSDR | 1.0.1 | MIT | https://github.com/hydrasdr/SoapyHydraSDR (`253ce508`) | Driver module |
 | SoapyBladeRF | 0.4.2 | LGPL-2.1 | https://github.com/pothosware/SoapyBladeRF (`f214a6d2`) | Driver module |
+| SoapySDRPlay3 | 0.5.3 | MIT | https://github.com/pothosware/SoapySDRPlay3 (`6cc31316`) | Driver module (see SDRplay below) |
 | librtlsdr (rtl-sdr) | 2.0.2 | GPL-2.0-or-later | https://github.com/osmocom/rtl-sdr (`619ac318`) | Statically linked into the RTL-SDR module |
 | libairspy (airspyone_host) | 1.0.10 | BSD-3-Clause | https://github.com/airspy/airspyone_host (`229d5a50`) | Statically linked into the Airspy module |
 | libairspyhf | 1.6.8 | BSD-3-Clause | https://github.com/airspy/airspyhf (`8891387e`) | Statically linked into the Airspy HF+ module |
@@ -40,6 +41,16 @@ including with modified versions of these components, by following [Building the
   library is configured, and linked against the static libusb above. The AD9361 driver gets libbladeRF's own patches
   from `thirdparty/analogdevicesinc/no-OS_local/patches`, applied by libbladeRF's build as usual.
 - No bladeRF FPGA images or FX3 firmware are included.
+- **SoapySDRPlay3**: `findSDRPlay()` returns no devices when the SDRplay API library is not installed, instead of
+  logging errors on every enumeration (applied at build time in [`native/CMakeLists.txt`](native/CMakeLists.txt)).
+
+## SDRplay
+
+No SDRplay software is included. The SDRplay driver module is SoapySDRPlay3 (MIT) compiled together with a
+jSoapySDR runtime loader ([`native/sdrplay/sdrplay_api_shim.cpp`](native/sdrplay/sdrplay_api_shim.cpp), Apache-2.0)
+that loads the SDRplay API library the user installs from SDRplay and calls it. Building the module requires the
+SDRplay API 3.15 header files, which the CI build downloads from sdrplay.com and does not redistribute; the SDRplay
+API itself is licensed by SDRplay Ltd under its own terms.
 
 ## GPL and LGPL components
 

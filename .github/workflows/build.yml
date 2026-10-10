@@ -14,9 +14,42 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # SDRplay API headers, needed to compile the SDRplay module's runtime loader. Only the headers are used, and only
+  # inside this workflow; nothing from the SDRplay API is bundled or published.
+  sdrplay-headers:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      SDRPLAY_API: SDRplay_RSP_API-Linux-3.15.2.run
+      SDRPLAY_API_SHA256: ''
+    steps:
+      - name: Download and extract the SDRplay API headers
+        run: |
+          curl -fsSL --retry 3 -o api.run "https://www.sdrplay.com/software/$SDRPLAY_API"
+          actual=$(sha256sum api.run | cut -d' ' -f1)
+          echo "::notice title=SDRplay API sha256::$SDRPLAY_API $actual"
+          if [ -n "$SDRPLAY_API_SHA256" ] && [ "$actual" != "$SDRPLAY_API_SHA256" ]; then
+            echo "::error::$SDRPLAY_API sha256 $actual does not match $SDRPLAY_API_SHA256"
+            exit 1
+          fi
+          # makeself archive: extract without running the installer
+          sh api.run --noexec --target api > /dev/null || { sudo apt-get install -y -q p7zip-full && 7z x -oapi7 api.run && 7z x -oapi api7/*; }
+          mkdir sdrplay-inc
+          cp "$(dirname "$(find api -name sdrplay_api.h | head -1)")"/*.h sdrplay-inc/
+          ls sdrplay-inc
+          grep -m1 "SDRPLAY_API_VERSION " sdrplay-inc/sdrplay_api.h
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: sdrplay-api-headers
+          path: sdrplay-inc
+          retention-days: 1
+          if-no-files-found: error
+
   # Builds the bundled SoapySDR + driver image on each platform and runs the full test suite against it
   natives:
     name: natives (${{ matrix.platform }})
+    needs: sdrplay-headers
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     strategy:
@@ -45,6 +78,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - uses: actions/download-artifact@v8
+        with:
+          name: sdrplay-api-headers
+          path: native/build/sdrplay-inc
+
       # Linux images are built in manylinux_2_28 (glibc 2.28) so they run on older distributions
       - name: Build native image (Linux, manylinux_2_28)
         if: runner.os == 'Linux'
@@ -54,7 +92,7 @@ jobs:
             PY=/opt/python/cp312-cp312/bin/python3
             \$PY -m pip install -q 'cmake>=3.28,<4'
             export PATH=/opt/python/cp312-cp312/bin:\$PATH
-            \$PY native/build.py --platform ${{ matrix.platform }}
+            \$PY native/build.py --platform ${{ matrix.platform }} --sdrplay-include native/build/sdrplay-inc
             chown -R $(id -u):$(id -g) native natives" 2>&1 | tee native-build.log
 
       - name: Install build tools (macOS)
@@ -68,7 +106,7 @@ jobs:
 
       - name: Build native image (macOS, Windows)
         if: runner.os != 'Linux'
-        run: python native/build.py --platform ${{ matrix.platform }} 2>&1 | tee native-build.log
+        run: python native/build.py --platform ${{ matrix.platform }} --sdrplay-include native/build/sdrplay-inc 2>&1 | tee native-build.log
 
       - uses: actions/setup-java@v6
         with:
@@ -81,6 +119,7 @@ jobs:
         run: >
           ./gradlew testDriver test
           -Psoapysdr.prefix=native/build/${{ matrix.platform }}/deps
+          -Psoapysdr.sdrplay.include=native/build/sdrplay-inc
           -Psoapysdr.tests.required=true
           -Psoapysdr.tests.bundled=true
           -Pnatives.required=${{ matrix.platform }}

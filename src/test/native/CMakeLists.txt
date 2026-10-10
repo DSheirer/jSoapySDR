@@ -36,3 +36,18 @@ if(APPLE)
 else()
     target_link_libraries(jsoapytest PRIVATE SoapySDR)
 endif()
+
+# Optional fake SDRplay API library (needs the SDRplay API headers in JS_SDRPLAY_INCLUDE). Its path is written to
+# fake-sdrplay-path.txt for the Gradle test task, which passes it to the SDRplay module in SOAPY_SDR_SDRPLAY_API.
+if(JS_SDRPLAY_INCLUDE)
+    add_library(fake_sdrplay_api SHARED FakeSdrplayApi.cpp)
+    target_include_directories(fake_sdrplay_api PRIVATE "${JS_SDRPLAY_INCLUDE}")
+    set_target_properties(fake_sdrplay_api PROPERTIES
+        OUTPUT_NAME fake_sdrplay_api
+        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/fake-sdrplay"
+        LIBRARY_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/fake-sdrplay"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/fake-sdrplay"
+        RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/fake-sdrplay")
+    file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/fake-sdrplay-path.txt" CONTENT "$<TARGET_FILE:fake_sdrplay_api>")
+endif()
+

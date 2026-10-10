@@ -80,12 +80,14 @@ class SoapySDRTest
     @Test
     void enumerateNullDevice()
     {
-        List<Map<String, String>> results = SoapySDR.enumerate("type=null");
+        // Some drivers (e.g. SDRplay) ignore filter keys they do not know, so count only the null device
+        List<Map<String, String>> results = SoapySDR.enumerate("type=null").stream()
+            .filter(device -> "null".equals(device.get("type"))).toList();
         assertEquals(1, results.size());
-        assertEquals("null", results.get(0).get("type"));
 
         // Map based filter
-        assertEquals(1, SoapySDR.enumerate(Map.of("type", "null")).size());
+        assertEquals(1, SoapySDR.enumerate(Map.of("type", "null")).stream()
+            .filter(device -> "null".equals(device.get("type"))).count());
     }
 
     @Test
