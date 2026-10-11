@@ -55,6 +55,7 @@ public final class NativeLibrary
     public static final String NATIVES_DIR_PROPERTY = "soapysdr.natives.dir";
     public static final String PLUGIN_PATH_PROPERTY = "soapysdr.plugin.path";
     public static final String BLADERF_FPGA_DIR_PROPERTY = "soapysdr.bladerf.fpga.dir";
+    public static final String SDRPLAY_LIBRARY_PROPERTY = "soapysdr.sdrplay.library";
 
     private static final String RESOURCE_ROOT = "/io/github/dsheirer/soapysdr/natives/";
     private static final String MANIFEST = "bundle.txt";
@@ -96,6 +97,13 @@ public final class NativeLibrary
         if(fpgaDir != null && !fpgaDir.isBlank())
         {
             setEnvironment("BLADERF_SEARCH_DIR", Path.of(fpgaDir).toAbsolutePath().toString());
+        }
+
+        // The bundled SDRplay module loads the separately installed SDRplay API library; this overrides its search
+        String sdrplayLibrary = System.getProperty(SDRPLAY_LIBRARY_PROPERTY);
+        if(sdrplayLibrary != null && !sdrplayLibrary.isBlank())
+        {
+            setEnvironment("SOAPY_SDR_SDRPLAY_API", sdrplayLibrary.trim());
         }
 
         // 1. Explicit library

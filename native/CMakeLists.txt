@@ -275,6 +275,52 @@ soapy_module(bladeRFSupport 0.4.2 ${soapybladerf_DIR}
 target_link_libraries(bladeRFSupport PRIVATE bladerf)
 
 # ---------------------------------------------------------------------------------------------------------------------
+# SDRplay (optional): built when the SDRplay API headers are supplied in JS_SDRPLAY_INCLUDE. The module contains a
+# shim (sdrplay/sdrplay_api_shim.cpp) that loads the user's installed SDRplay API library at runtime; nothing from
+# the SDRplay API is bundled.
+# ---------------------------------------------------------------------------------------------------------------------
+
+if(JS_SDRPLAY_INCLUDE)
+    file(TO_CMAKE_PATH "${JS_SDRPLAY_INCLUDE}" JS_SDRPLAY_INCLUDE)
+    if(NOT EXISTS "${JS_SDRPLAY_INCLUDE}/sdrplay_api.h")
+        message(FATAL_ERROR "sdrplay_api.h not found in JS_SDRPLAY_INCLUDE=${JS_SDRPLAY_INCLUDE}")
+    endif()
+    fetch_source(soapysdrplay https://github.com/pothosware/SoapySDRPlay3 soapy-sdrplay3-0.5.3 6cc31316b730503cee3e30906ff1975175a16400)
+
+    # Patch: find nothing (instead of logging errors on every enumeration) when the SDRplay API is not installed
+    file(READ ${soapysdrplay_DIR}/Registration.cpp SDRPLAY_REGISTRATION)
+    set(SDRPLAY_FIND "static std::vector<SoapySDR::Kwargs> findSDRPlay(const SoapySDR::Kwargs &args)\n{\n   std::vector<SoapySDR::Kwargs> results;\n")
+    string(FIND "${SDRPLAY_REGISTRATION}" "${SDRPLAY_FIND}" SDRPLAY_POS)
+    if(SDRPLAY_POS EQUAL -1)
+        message(FATAL_ERROR "SoapySDRPlay3 patch no longer applies to Registration.cpp")
+    endif()
+    string(REPLACE "${SDRPLAY_FIND}"
+        "extern \"C\" bool jsoapysdr_sdrplay_api_available(void);\n${SDRPLAY_FIND}   if (!jsoapysdr_sdrplay_api_available()) return results; /* jSoapySDR */\n"
+        SDRPLAY_REGISTRATION "${SDRPLAY_REGISTRATION}")
+    file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/patched/sdrplay/Registration.cpp "${SDRPLAY_REGISTRATION}")
+
+    soapy_module(sdrPlaySupport 0.5.3 ${soapysdrplay_DIR}
+        ${CMAKE_CURRENT_BINARY_DIR}/patched/sdrplay/Registration.cpp
+        ${soapysdrplay_DIR}/sdrplay_api.cpp ${soapysdrplay_DIR}/Settings.cpp ${soapysdrplay_DIR}/Streaming.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/sdrplay/sdrplay_api_shim.cpp)
+    target_include_directories(sdrPlaySupport PRIVATE "${JS_SDRPLAY_INCLUDE}")
+    # Plain declarations (not dllimport): the shim defines the API functions
+    target_compile_definitions(sdrPlaySupport PRIVATE "_SDRPLAY_DLL_QUALIFIER=" RF_GAIN_IN_MENU=1)
+    if(WIN32)
+        target_link_libraries(sdrPlaySupport PRIVATE advapi32)
+        # SoapySDRPlay3 maps strcasecmp to _stricmp only for x86/x64 Windows
+        if(CMAKE_GENERATOR_PLATFORM MATCHES "^[Aa][Rr][Mm]64$" OR CMAKE_SYSTEM_PROCESSOR MATCHES "^(ARM64|arm64|aarch64)$")
+            target_compile_definitions(sdrPlaySupport PRIVATE strcasecmp=_stricmp)
+        endif()
+    else()
+        target_link_libraries(sdrPlaySupport PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
+    endif()
+    install(FILES "${soapysdrplay_DIR}/LICENSE.txt" DESTINATION licenses RENAME SoapySDRPlay3-MIT.txt)
+else()
+    message(STATUS "SDRplay API headers not supplied (JS_SDRPLAY_INCLUDE); the SDRplay module is not built")
+endif()
+
+# ---------------------------------------------------------------------------------------------------------------------
 # SoapySDR core library and runtime files
 # ---------------------------------------------------------------------------------------------------------------------
 

@@ -37,6 +37,8 @@ class BundledImageTest
         "SoapyHydraSDR", "1.0.1",
         "bladeRFSupport", "0.4.2");
 
+    private static final String SDRPLAY_MODULE = "sdrPlaySupport";
+
     @BeforeEach
     void requireBundled()
     {
@@ -80,14 +82,28 @@ class BundledImageTest
                 }
             }
         }
-        assertEquals(new TreeMap<>(MODULES), versions);
+        Map<String, String> expected = new TreeMap<>(MODULES);
+        // The SDRplay module is built only when the SDRplay API headers are available (always in CI)
+        if(Boolean.getBoolean("soapysdr.tests.sdrplay") || SoapySDR.listModules().stream()
+            .anyMatch(m -> m.contains(SDRPLAY_MODULE)))
+        {
+            expected.put(SDRPLAY_MODULE, "0.5.3");
+            for(String module : SoapySDR.listModules())
+            {
+                if(module.contains(SDRPLAY_MODULE))
+                {
+                    versions.put(SDRPLAY_MODULE, SoapySDR.getModuleVersion(module));
+                }
+            }
+        }
+        assertEquals(expected, versions);
     }
 
     @Test
     void enumerateEveryDriverWithoutHardware()
     {
         // Must not crash even where libusb cannot initialize (containers, CI); finds no devices without hardware
-        for(String driver : List.of("rtlsdr", "airspy", "airspyhf", "hackrf", "hydrasdr", "bladerf"))
+        for(String driver : List.of("rtlsdr", "airspy", "airspyhf", "hackrf", "hydrasdr", "bladerf", "sdrplay"))
         {
             for(Map<String, String> device : SoapySDR.enumerate("driver=" + driver))
             {
@@ -95,6 +111,23 @@ class BundledImageTest
             }
         }
         SoapySDR.enumerate();
+    }
+
+    @Test
+    void sdrplayModuleUsesInstalledApiLibrary()
+    {
+        // With the test fixture standing in for the SDRplay API library, the bundled SDRplay module must load it
+        // and report its one device
+        boolean fake = Boolean.getBoolean("soapysdr.tests.fake.sdrplay");
+        if(Boolean.getBoolean("soapysdr.tests.required") && Boolean.getBoolean("soapysdr.tests.sdrplay") && !fake)
+        {
+            throw new AssertionError("SDRplay module tests are required but the fake SDRplay API was not built");
+        }
+        Assumptions.assumeTrue(fake, "fake SDRplay API not built");
+        List<Map<String, String>> devices = SoapySDR.enumerate("driver=sdrplay");
+        assertEquals(1, devices.size(), devices.toString());
+        assertEquals("JSOAPYTEST1", devices.get(0).get("serial"));
+        assertEquals("sdrplay", devices.get(0).get("driver"));
     }
 
     @Test

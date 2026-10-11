@@ -81,6 +81,7 @@ jobs:
         run: >
           ./gradlew testDriver test
           -Psoapysdr.prefix=native/build/${{ matrix.platform }}/deps
+          -Psoapysdr.sdrplay.include=native/sdrplay/include
           -Psoapysdr.tests.required=true
           -Psoapysdr.tests.bundled=true
           -Pnatives.required=${{ matrix.platform }}

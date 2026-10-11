@@ -61,6 +61,7 @@ WINDOWS_PRELOAD = {
     "windows-aarch64": ["vcruntime140.dll", "msvcp140.dll", "bladeRF.dll"],
 }
 
+# Driver modules always built; SDRplay adds one unless --sdrplay-include "" is given
 EXPECTED_MODULES = 6
 
 
@@ -269,7 +270,7 @@ def sha256(path):
     return digest.hexdigest()
 
 
-def write_bundle(stage, out, plat):
+def write_bundle(stage, out, plat, expected_modules):
     if out.exists():
         shutil.rmtree(out)
     shutil.copytree(stage, out)
@@ -288,8 +289,8 @@ def write_bundle(stage, out, plat):
         preload = []
 
     modules = [r for r in rel if r.startswith("lib/SoapySDR/modules")]
-    if len(modules) != EXPECTED_MODULES:
-        sys.exit("Expected %d driver modules but found: %s" % (EXPECTED_MODULES, modules))
+    if len(modules) != expected_modules:
+        sys.exit("Expected %d driver modules but found: %s" % (expected_modules, modules))
 
     lines = ["# jSoapySDR native bundle", "platform=" + plat, "core=" + core]
     lines += ["preload=" + p for p in preload]
@@ -307,6 +308,10 @@ def main():
     parser.add_argument("--platform", choices=PLATFORMS, default=None)
     parser.add_argument("--vcpkg-root", default=str(NATIVE_DIR / "build" / "vcpkg"), help="Windows only")
     parser.add_argument("--out", default=None, help="output directory (default <repo>/natives/<platform>)")
+    parser.add_argument("--sdrplay-include",
+                        default=os.environ.get("JSOAPYSDR_SDRPLAY_INCLUDE", str(NATIVE_DIR / "sdrplay" / "include")),
+                        help="directory containing the SDRplay API 3.x headers (default: the copies in "
+                             "native/sdrplay/include); pass an empty string to skip the SDRplay module")
     args = parser.parse_args()
 
     plat = args.platform or detect_platform()
@@ -356,13 +361,17 @@ def main():
         "-DJS_BLADERF_RUNTIME=" + cmake_path(bladerf_runtime),
         "-DJS_BLADERF_INCLUDE=" + cmake_path(deps / "include"),
     ]
+    expected_modules = EXPECTED_MODULES
+    if args.sdrplay_include:
+        configure.append("-DJS_SDRPLAY_INCLUDE=" + cmake_path(Path(args.sdrplay_include).resolve()))
+        expected_modules += 1
 
     run(configure)
     run(["cmake", "--build", build_dir / "modules", "--config", "Release", "--parallel"])
     run(["cmake", "--install", build_dir / "modules", "--config", "Release"])
 
     out = Path(args.out) if args.out else REPO_DIR / "natives" / plat
-    write_bundle(stage, out, plat)
+    write_bundle(stage, out, plat, expected_modules)
 
 
 if __name__ == "__main__":

@@ -27,8 +27,18 @@ Each platform image contains:
 | SoapyHackRF + libhackrf | 0.3.4 + 2024.02.1 | HackRF One |
 | SoapyHydraSDR + libhydrasdr | 1.0.1 + 1.1.3 | HydraSDR RFOne |
 | SoapyBladeRF + libbladeRF | 0.4.2 + 2.6.0 | bladeRF x40/x115, bladeRF 2.0 micro xA4/xA5/xA9 |
+| SoapySDRPlay3 | 0.5.3 | SDRplay RSP1, RSP1A, RSP1B, RSP2, RSPduo, RSPdx, RSPdx-R2 (requires the SDRplay API, see below) |
 
 libusb is linked into each driver (and into libbladeRF, which is included as a separate shared library), so the image has no dependencies beyond the base operating system (and the Microsoft C++ runtime, which is included on Windows). The build verifies this for every platform.
+
+### SDRplay
+
+SDRplay's API is proprietary and is not part of jSoapySDR. To use an SDRplay RSP, install the **SDRplay API 3.x** for your platform from [sdrplay.com](https://www.sdrplay.com/api/) — it provides the `sdrplay_api` library and the `sdrplay_apiService` background service that must be running. The bundled SDRplay driver loads that library at runtime from its standard install location:
+
+- Linux and macOS: `libsdrplay_api.so.3` on the loader path, in `/usr/local/lib` or in `/usr/lib`
+- Windows: `<install dir>\x64\sdrplay_api.dll` (`arm64` on ARM64) using the install directory recorded in the registry, then `C:\Program Files\SDRplay\API`
+
+Set `-Dsoapysdr.sdrplay.library=<path>` if it is installed elsewhere. Without the API installed, the SDRplay driver simply finds no devices. The driver was built against API 3.15 and logs a warning if the installed version differs.
 
 ### bladeRF FPGA images
 
@@ -39,7 +49,7 @@ A bladeRF needs its FPGA configured before it can stream. FPGA images and FX3 fi
 
 Keep the board's FX3 firmware current with Nuand's tools, as libbladeRF 2.6.0 requires.
 
-Other hardware (SDRplay, LimeSDR, USRP, PlutoSDR, …) can be used alongside the bundled drivers by installing that vendor's SoapySDR 0.8 module and pointing jSoapySDR at it with `-Dsoapysdr.plugin.path=<directory>`, or by using a system SoapySDR installation instead of the bundle (`-Dsoapysdr.bundled=false`).
+Other hardware (LimeSDR, USRP, PlutoSDR, …) can be used alongside the bundled drivers by installing that vendor's SoapySDR 0.8 module and pointing jSoapySDR at it with `-Dsoapysdr.plugin.path=<directory>`, or by using a system SoapySDR installation instead of the bundle (`-Dsoapysdr.bundled=false`).
 
 ### USB access
 
@@ -146,6 +156,7 @@ The native library is loaded on first use:
 | `soapysdr.natives.dir` | Directory to extract bundled images to |
 | `soapysdr.plugin.path` | Extra directories of SoapySDR 0.8 driver modules to load alongside the bundled drivers (`:`-separated, `;` on Windows) |
 | `soapysdr.bladerf.fpga.dir` | Directory containing bladeRF FPGA images (sets `BLADERF_SEARCH_DIR`) |
+| `soapysdr.sdrplay.library` | Path to the installed SDRplay API library, when it is not in the standard location |
 
 ## Building
 
@@ -162,16 +173,16 @@ python3 native/build.py                          # the current platform, into na
 python3 native/build.py --platform linux-aarch64 # must match the machine; there is no cross compilation
 ```
 
-The script fetches every component by tag and fails if a tag does not resolve to the pinned commit. It builds SoapySDR, a static libusb and libbladeRF, compiles the other vendor libraries and the Soapy modules, and installs them into a relocatable layout. It then verifies that each binary depends only on the bundle and the base OS, and writes `natives/<platform>/bundle.txt`, which lists every file with its SHA-256. On Windows, vcpkg supplies libusb and pthreads-win32.
+The SDRplay driver compiles against the SDRplay API 3.15 headers in `native/sdrplay/include` (pass `--sdrplay-include ""` to skip it). The script fetches every component by tag and fails if a tag does not resolve to the pinned commit. It builds SoapySDR, a static libusb and libbladeRF, compiles the other vendor libraries and the Soapy modules, and installs them into a relocatable layout. It then verifies that each binary depends only on the bundle and the base OS, and writes `natives/<platform>/bundle.txt`, which lists every file with its SHA-256. On Windows, vcpkg supplies libusb and pthreads-win32.
 
 Prerequisites: git, CMake 3.24+, Python 3.8+ and a C/C++ toolchain. On Linux and macOS you also need autoconf, automake, libtool and make, and Ninja is used if present. On Windows you need Visual Studio 2022 or newer with the C++ workload. CI builds the Linux images inside the `manylinux_2_28` containers so they run on glibc 2.28 and newer.
 
 ### Tests
 
-Unit tests run against the real SoapySDR library. Most use a small deterministic fake device, the **jsoapytest** driver module in `src/test/native`, so streaming, struct marshalling and driver error propagation are verified without hardware. `BundledImageTest` checks the extracted image and its six drivers.
+Unit tests run against the real SoapySDR library. Most use a small deterministic fake device, the **jsoapytest** driver module in `src/test/native`, so streaming, struct marshalling and driver error propagation are verified without hardware. `BundledImageTest` checks the extracted image and its drivers; when built with the SDRplay API headers, a fake SDRplay API library checks that the SDRplay driver loads and uses the installed API.
 
 ```
-./gradlew testDriver test -Psoapysdr.prefix=native/build/<platform>/deps
+./gradlew testDriver test -Psoapysdr.prefix=native/build/<platform>/deps -Psoapysdr.sdrplay.include=native/sdrplay/include
 ```
 
 `-Psoapysdr.prefix` points the test driver at SoapySDR headers (here, those from the native build); omit it to use a system `libsoapysdr-dev`. Tests that need the library, the test driver or the bundled image are skipped when unavailable. `-Psoapysdr.tests.required=true` and `-Psoapysdr.tests.bundled=true` (as CI uses on all six platforms) turn those skips into failures.
