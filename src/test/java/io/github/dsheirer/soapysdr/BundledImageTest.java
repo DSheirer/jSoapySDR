@@ -118,7 +118,12 @@ class BundledImageTest
     {
         // With the test fixture standing in for the SDRplay API library, the bundled SDRplay module must load it
         // and report its one device
-        Assumptions.assumeTrue(Boolean.getBoolean("soapysdr.tests.fake.sdrplay"), "fake SDRplay API not built");
+        boolean fake = Boolean.getBoolean("soapysdr.tests.fake.sdrplay");
+        if(Boolean.getBoolean("soapysdr.tests.required") && Boolean.getBoolean("soapysdr.tests.sdrplay") && !fake)
+        {
+            throw new AssertionError("SDRplay module tests are required but the fake SDRplay API was not built");
+        }
+        Assumptions.assumeTrue(fake, "fake SDRplay API not built");
         List<Map<String, String>> devices = SoapySDR.enumerate("driver=sdrplay");
         assertEquals(1, devices.size(), devices.toString());
         assertEquals("JSOAPYTEST1", devices.get(0).get("serial"));
