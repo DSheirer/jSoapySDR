@@ -1,17 +1,18 @@
+# Builds the bundled native image on all six platforms, tests the bindings against
+# each one, assembles the jar with all six images, and loads that jar on each platform.
+# Called by the ci, nightly and release workflows.
 name: Build
 
 on:
-  push:
-    branches: [ '**' ]
-  pull_request:
-  workflow_dispatch:
+  workflow_call:
+    inputs:
+      version:
+        description: Version of the jar
+        required: true
+        type: string
 
 permissions:
   contents: read
-
-concurrency:
-  group: build-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
   # Builds the bundled SoapySDR + driver image on each platform and runs the full test suite against it
@@ -102,6 +103,7 @@ jobs:
           name: natives-${{ matrix.platform }}
           path: natives/${{ matrix.platform }}
           if-no-files-found: error
+          retention-days: 7
 
       - uses: actions/upload-artifact@v7
         if: failure()
@@ -138,16 +140,21 @@ jobs:
       - uses: gradle/actions/setup-gradle@v6
 
       - name: Build jar with all platform images
-        run: ./gradlew jar sourcesJar javadocJar compileExamplesJava -Pnatives.required=all
+        env:
+          VERSION: ${{ inputs.version }}
+        run: ./gradlew jar sourcesJar javadocJar compileExamplesJava -Pnatives.required=all -Pversion="$VERSION"
 
       - name: Jar contents
-        run: unzip -l build/libs/jsoapysdr-*-SNAPSHOT.jar | grep -E 'natives/.*/(bundle.txt|lib|bin)|META-INF/licenses' | head -80
+        env:
+          VERSION: ${{ inputs.version }}
+        run: unzip -l "build/libs/jsoapysdr-$VERSION.jar" | grep -E 'natives/.*/(bundle.txt|lib|bin)|META-INF/licenses' | head -80
 
       - uses: actions/upload-artifact@v7
         with:
-          name: jsoapysdr-jar
+          name: jars
           path: build/libs/*.jar
           if-no-files-found: error
+          retention-days: 7
 
   # Runs the packaged jar on every platform: it must pick, extract and load the right image
   smoke:
@@ -175,7 +182,7 @@ jobs:
 
       - uses: actions/download-artifact@v8
         with:
-          name: jsoapysdr-jar
+          name: jars
           path: libs
 
       - uses: actions/setup-java@v6

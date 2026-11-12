@@ -1,10 +1,8 @@
 plugins {
     id 'java-library'
-    id 'maven-publish'
 }
 
-group = 'io.github.dsheirer'
-version = '0.1.0-SNAPSHOT'
+// group and version are set in gradle.properties. Workflows pass -Pversion for tagged, nightly and pull request builds.
 description = 'Java bindings for SoapySDR using the Foreign Function & Memory API'
 
 java {
@@ -82,6 +80,12 @@ tasks.named('jar', Jar) {
     dependsOn verifyNatives
     from(rootProject.file('LICENSE')) { into 'META-INF' }
     from(rootProject.file('THIRD-PARTY-NOTICES.md')) { into 'META-INF' }
+    manifest {
+        attributes(
+            'Implementation-Title': 'jSoapySDR',
+            'Implementation-Version': project.version,
+            'Enable-Native-Access': 'ALL-UNNAMED')
+    }
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -173,48 +177,4 @@ tasks.register('rxPower', JavaExec) {
     classpath = sourceSets.examples.runtimeClasspath
     mainClass = 'io.github.dsheirer.soapysdr.examples.RxPower'
     jvmArgs '--enable-native-access=ALL-UNNAMED'
-}
-
-// ---------------------------------------------------------------------------------------------------------------------
-// Publishing: ./gradlew publishToMavenLocal, or ./gradlew publish to GitHub Packages (GITHUB_ACTOR / GITHUB_TOKEN)
-// ---------------------------------------------------------------------------------------------------------------------
-
-publishing {
-    publications {
-        maven(MavenPublication) {
-            artifactId = 'jsoapysdr'
-            from components.java
-            pom {
-                name = 'jSoapySDR'
-                description = project.description
-                url = 'https://github.com/dsheirer/jSoapySDR'
-                licenses {
-                    license {
-                        name = 'Apache License, Version 2.0'
-                        url = 'https://www.apache.org/licenses/LICENSE-2.0'
-                    }
-                }
-                developers {
-                    developer {
-                        id = 'dsheirer'
-                        name = 'Dennis Sheirer'
-                    }
-                }
-                scm {
-                    url = 'https://github.com/dsheirer/jSoapySDR'
-                    connection = 'scm:git:https://github.com/dsheirer/jSoapySDR.git'
-                }
-            }
-        }
-    }
-    repositories {
-        maven {
-            name = 'GitHubPackages'
-            url = 'https://maven.pkg.github.com/dsheirer/jSoapySDR'
-            credentials {
-                username = System.getenv('GITHUB_ACTOR')
-                password = System.getenv('GITHUB_TOKEN')
-            }
-        }
-    }
 }

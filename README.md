@@ -59,6 +59,30 @@ The bundled drivers talk to the radio over USB, so the usual per-OS setup still 
 - **Windows:** assign the WinUSB driver to the device with [Zadig](https://zadig.akeo.ie/) (RTL-SDR, Airspy, HackRF, HydraSDR, bladeRF).
 - **macOS:** no setup needed.
 
+## Getting it
+
+Download `jsoapysdr-<version>.jar` from [Releases](https://github.com/DSheirer/jSoapySDR/releases). The rolling [`nightly`](https://github.com/DSheirer/jSoapySDR/releases/tag/nightly) pre-release tracks `main`. Each release also carries the sources and javadoc jars and a `SHA256SUMS` file.
+
+To use it from Gradle without a Maven repository, point an Ivy repository at the GitHub releases:
+
+```kotlin
+repositories {
+    ivy {
+        url = uri("https://github.com/DSheirer/jSoapySDR/releases/download")
+        patternLayout {
+            artifact("v[revision]/[artifact]-[revision].[ext]")
+            artifact("nightly/[artifact]-[revision].[ext]")
+        }
+        metadataSources { artifact() }
+        content { includeModule("io.github.dsheirer", "jsoapysdr") }
+    }
+}
+
+dependencies {
+    implementation("io.github.dsheirer:jsoapysdr:<version>")
+}
+```
+
 ## Quick start
 
 ```java
@@ -164,7 +188,7 @@ The native library is loaded on first use:
 ./gradlew build
 ```
 
-The Gradle toolchain resolver downloads a JDK 25 if one isn't installed. The jar includes whichever platform images are present under `natives/` (none in a fresh clone, in which case a system SoapySDR is used). Release builds use `-Pnatives.required=all`, which fails unless all six are present; CI produces such a jar as the `jsoapysdr-jar` artifact.
+The Gradle toolchain resolver downloads a JDK 25 if one isn't installed. The jar includes whichever platform images are present under `natives/` (none in a fresh clone, in which case a system SoapySDR is used). Release builds use `-Pnatives.required=all`, which fails unless all six are present; CI produces such a jar as the `jars` artifact.
 
 ### Building the native images
 
@@ -195,11 +219,17 @@ Unit tests run against the real SoapySDR library. Most use a small deterministic
 ./gradlew rxPower --args="driver=rtlsdr 162.55e6 2.4e6" # stream for 3 s, print power per block
 ```
 
-### Publishing
+## Releases
 
-```
-./gradlew publishToMavenLocal     # io.github.dsheirer:jsoapysdr:0.1.0-SNAPSHOT
-```
+The version of the next release is set in [`gradle.properties`](gradle.properties). Releases are built and published by GitHub Actions; nothing is published to a Maven repository.
+
+| Trigger | What happens |
+|---------|--------------|
+| Pull request | Builds and tests all six platforms; publishes nothing |
+| Merge or push to `main` | Replaces the `nightly` pre-release, versioned `<version>-nightly.<yyyymmdd>.<commit>` |
+| Tag `vX.Y.Z` | Publishes a release of that version |
+
+To release, tag the version in `gradle.properties`: `git tag v0.1.0 && git push origin v0.1.0`. The workflow rejects a tag that does not match it. For a pre-release add a suffix, such as `v0.1.0-rc1`. Afterwards, raise the version in `gradle.properties` for the next release.
 
 ## License
 
